@@ -2,7 +2,10 @@
 
 import os
 import sys
+import csv
+import io
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 # Add packages to path so we can import core and connectors
 _pkg_root = Path(__file__).resolve().parents[2] / "packages"
@@ -22,6 +25,8 @@ from black_ink_signal_core.scoring import score_band
 from black_ink_signal_core.enrichment import enrich_lead, enrich_all_pending
 from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
 from black_ink_signal_core.notifications import get_recent_notifications, notify_hot_leads
+from black_ink_signal_core.ingest import ingest_reddit_items
+from black_ink_signal_core.scoring import score_lead as _score_lead_fn
 
 app = FastAPI(title="Black Ink Signal", version="0.1.0")
 
@@ -168,7 +173,7 @@ class StatusUpdate(BaseModel):
 
 @app.patch("/leads/{lead_id}/status")
 def update_lead_status(lead_id: int, body: StatusUpdate):
-    valid = {"new", "reviewing", "contacted", "saved", "dismissed"}
+    valid = {"new", "reviewing", "contacted", "saved", "dismissed", "bad_match", "booked", "follow_up"}
     if body.status not in valid:
         raise HTTPException(400, f"Invalid status. Must be one of: {valid}")
     with _Session() as s:
@@ -339,6 +344,60 @@ def stats():
         return {"total": total, "hot": hot, "strong": strong, "watchlist": watchlist}
 
 
+@app.get("/stats/daily")
+def daily_summary():
+    """Daily summary: leads today, top sources, top keywords, status breakdown."""
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    with _Session() as s:
+        # Leads fetched today
+        today_leads = s.query(Lead).filter(Lead.fetched_at >= today_start).all()
+
+        hot_today = [l for l in today_leads if l.lead_score >= 80]
+        strong_today = [l for l in today_leads if 60 <= l.lead_score < 80]
+
+        # Status breakdown (all leads)
+        all_leads = s.query(Lead).filter(Lead.hidden == False).all()
+        status_counts = {}
+        for l in all_leads:
+            status_counts[l.lead_status] = status_counts.get(l.lead_status, 0) + 1
+
+        # Top keywords today
+        keyword_counts: dict[str, int] = {}
+        for l in today_leads:
+            if l.keyword_trigger:
+                for kw in l.keyword_trigger.split(";"):
+                    kw = kw.strip()
+                    if kw:
+                        keyword_counts[kw] = keyword_counts.get(kw, 0) + 1
+        top_keywords = sorted(keyword_counts.items(), key=lambda x: -x[1])[:10]
+
+        # Top subreddits today
+        sub_counts: dict[str, int] = {}
+        for l in today_leads:
+            if l.subreddit:
+                sub_counts[l.subreddit] = sub_counts.get(l.subreddit, 0) + 1
+        top_sources = sorted(sub_counts.items(), key=lambda x: -x[1])[:5]
+
+        # Semantic labels today
+        label_counts: dict[str, int] = {}
+        for l in today_leads:
+            if l.semantic_label:
+                label_counts[l.semantic_label] = label_counts.get(l.semantic_label, 0) + 1
+        top_intents = sorted(label_counts.items(), key=lambda x: -x[1])[:5]
+
+    return {
+        "date": today_start.strftime("%Y-%m-%d"),
+        "leads_today": len(today_leads),
+        "hot_today": len(hot_today),
+        "strong_today": len(strong_today),
+        "status_breakdown": status_counts,
+        "top_keywords": [{"keyword": k, "count": v} for k, v in top_keywords],
+        "top_sources": [{"source": k, "count": v} for k, v in top_sources],
+        "top_intents": [{"intent": k, "count": v} for k, v in top_intents],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Notifications
 # ---------------------------------------------------------------------------
@@ -354,3 +413,181 @@ def trigger_notifications():
     with _Session() as s:
         sent = notify_hot_leads(s)
         return {"notifications_sent": sent}
+
+
+# ---------------------------------------------------------------------------
+# Source Health
+# ---------------------------------------------------------------------------
+
+@app.get("/sources/health")
+def source_health():
+    """Return health status for all configured sources."""
+    reddit_oauth = bool(
+        os.environ.get("BIS_REDDIT_CLIENT_ID") and
+        os.environ.get("BIS_REDDIT_CLIENT_SECRET")
+    )
+
+    with _Session() as s:
+        # Last Reddit run
+        last_run = (
+            s.query(SourceRun)
+            .filter(SourceRun.source == "reddit")
+            .order_by(SourceRun.started_at.desc())
+            .first()
+        )
+
+        # Recent runs (last 24h)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        recent_runs = (
+            s.query(SourceRun)
+            .filter(SourceRun.source == "reddit", SourceRun.started_at >= cutoff)
+            .all()
+        )
+
+        total_added_24h = sum(r.items_added or 0 for r in recent_runs)
+        total_errors_24h = sum(1 for r in recent_runs if r.status == "error")
+
+        # Enrichment status
+        unenriched = s.query(Lead).filter(Lead.intent_summary.is_(None), Lead.hidden == False).count()
+        total_leads = s.query(Lead).count()
+
+    return {
+        "reddit": {
+            "oauth_configured": reddit_oauth,
+            "connector_mode": "oauth" if reddit_oauth else "public_json",
+            "last_fetch": last_run.started_at.isoformat() if last_run else None,
+            "last_fetch_status": last_run.status if last_run else None,
+            "last_fetch_items_seen": last_run.items_seen if last_run else 0,
+            "last_fetch_items_added": last_run.items_added if last_run else 0,
+            "last_fetch_errors": last_run.errors if last_run else None,
+            "runs_24h": len(recent_runs),
+            "added_24h": total_added_24h,
+            "errors_24h": total_errors_24h,
+        },
+        "enrichment": {
+            "llm_configured": bool(os.environ.get("BIS_LLM_API_KEY")),
+            "mode": "llm+rules" if os.environ.get("BIS_LLM_API_KEY") else "rules_only",
+            "pending": unenriched,
+        },
+        "scheduler": {
+            "reddit_interval_min": int(os.environ.get("BIS_REDDIT_INTERVAL", "5")),
+            "enrichment_interval_min": int(os.environ.get("BIS_ENRICHMENT_INTERVAL", "2")),
+        },
+        "database": {
+            "total_leads": total_leads,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin Actions
+# ---------------------------------------------------------------------------
+
+@app.post("/admin/fetch-reddit")
+def admin_fetch_reddit():
+    """Manually trigger a Reddit fetch now."""
+    try:
+        from connector import RedditConnector
+        try:
+            from oauth_connector import RedditOAuthConnector
+        except ImportError:
+            RedditOAuthConnector = None
+
+        cid = os.environ.get("BIS_REDDIT_CLIENT_ID", "")
+        csec = os.environ.get("BIS_REDDIT_CLIENT_SECRET", "")
+        uname = os.environ.get("BIS_REDDIT_USERNAME", "")
+        pwd = os.environ.get("BIS_REDDIT_PASSWORD", "")
+
+        if cid and csec and uname and pwd and RedditOAuthConnector:
+            connector = RedditOAuthConnector(
+                client_id=cid, client_secret=csec,
+                username=uname, password=pwd,
+                user_agent=os.environ.get("BIS_REDDIT_USER_AGENT", "BlackInkSignal/0.1"),
+            )
+        else:
+            connector = RedditConnector()
+
+        items = connector.fetch_all_new()
+        connector.close()
+
+        with _Session() as session:
+            run = SourceRun(source="reddit")
+            session.add(run)
+            session.commit()
+            stats = ingest_reddit_items(session, items, source_run=run)
+
+        return {"status": "ok", "items_fetched": len(items), **stats}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/admin/enrich")
+def admin_enrich(limit: int = Query(default=50, le=200)):
+    """Manually trigger enrichment batch."""
+    with _Session() as s:
+        count = enrich_all_pending(s, _classifier, limit=limit)
+        return {"enriched": count}
+
+
+@app.post("/admin/seed")
+def admin_seed():
+    """Seed demo leads into the database."""
+    import importlib.util
+    seed_path = Path(__file__).parent / "seed_data.py"
+    spec = importlib.util.spec_from_file_location("seed_data", seed_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.seed()
+    with _Session() as s:
+        total = s.query(Lead).count()
+    return {"status": "ok", "total_leads": total}
+
+
+@app.post("/admin/rescore")
+def admin_rescore():
+    """Rescore all leads with current scoring engine."""
+    updated = 0
+    with _Session() as s:
+        leads = s.query(Lead).all()
+        for lead in leads:
+            r = _score_lead_fn(
+                title=lead.title or "",
+                body=lead.body or "",
+                subreddit=lead.subreddit or "",
+                created_at=lead.created_at,
+                score_ups=lead.score_ups,
+                num_comments=lead.num_comments,
+            )
+            if lead.lead_score != r.total:
+                lead.lead_score = r.total
+                lead.geo_estimate = r.geo_estimate
+                lead.geo_confidence = r.geo_confidence
+                lead.keyword_trigger = r.keyword_trigger
+                lead.semantic_label = r.semantic_label
+                updated += 1
+        s.commit()
+    return {"rescored": len(leads), "changed": updated}
+
+
+@app.delete("/admin/clear-demo")
+def admin_clear_demo():
+    """Remove all seed/demo leads (source_item_id starts with t3_seed_)."""
+    with _Session() as s:
+        demo_leads = s.query(Lead).filter(Lead.source_item_id.like("t3_seed_%")).all()
+        count = len(demo_leads)
+        for lead in demo_leads:
+            s.delete(lead)
+        s.commit()
+    return {"deleted": count}
+
+
+@app.delete("/admin/clear-all")
+def admin_clear_all():
+    """Delete ALL leads. Use with caution."""
+    with _Session() as s:
+        count = s.query(Lead).count()
+        s.query(LeadEvent).delete()
+        s.query(Lead).delete()
+        s.query(SourceRun).delete()
+        s.commit()
+    return {"deleted": count}

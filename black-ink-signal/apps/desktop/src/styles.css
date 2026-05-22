@@ -529,3 +529,171 @@ body { background: var(--bg); }
   color: var(--text-muted);
   margin-top: 2px;
 }
+
+/* View toggle */
+.view-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 3px;
+}
+.view-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.view-btn:hover { color: var(--text); }
+.view-btn--active { background: var(--accent); color: #000; font-weight: 600; }
+
+.filter-chips--wrap { flex-wrap: wrap; }
+
+/* Admin panel */
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 8px 0;
+}
+
+.admin-section {}
+.admin-section__title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.health-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+.health-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.health-card__body { display: flex; flex-direction: column; gap: 6px; }
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.health-dot--green { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+.health-dot--yellow { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+.health-dot--red { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4); }
+
+.health-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.health-value { color: var(--text); font-weight: 500; }
+.health-value--ok { color: #22c55e; }
+.health-value--warn { color: #f59e0b; }
+
+/* Daily summary */
+.daily-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.daily-stat {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  text-align: center;
+  min-width: 70px;
+}
+.daily-stat__value { display: block; font-size: 18px; font-weight: 700; }
+.daily-stat__label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+.daily-stat--hot .daily-stat__value { color: var(--hot); }
+.daily-stat--strong .daily-stat__value { color: var(--strong); }
+
+.daily-list { margin-top: 10px; }
+.daily-list__title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.daily-list__item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+.daily-list__count { color: var(--accent); font-weight: 600; }
+
+/* Admin actions */
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.admin-btn {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.admin-btn:hover { border-color: var(--accent); color: var(--accent); }
+.admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.admin-btn--danger:hover { border-color: var(--hot); color: var(--hot); }
+
+.action-log {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.action-log__line {
+  padding: 2px 0;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.action-log__line:last-child { border-bottom: none; }
+
+/* Extra status colors */
+.lead-tag--status-booked { color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.lead-tag--status-follow_up { color: #a78bfa; border-color: rgba(167,139,250,0.3); }
+.lead-tag--status-bad_match { color: var(--hot); border-color: rgba(239,68,68,0.3); }
+.action-btn--booked:hover { color: #22c55e; border-color: #22c55e; }
+.action-btn--follow_up:hover { color: #a78bfa; border-color: #a78bfa; }
+.action-btn--bad_match:hover { color: var(--hot); border-color: var(--hot); }

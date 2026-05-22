@@ -9,7 +9,7 @@ interface Props {
   onNotesChange: (notes: string) => void
 }
 
-const STATUS_OPTIONS = ['new', 'reviewing', 'contacted', 'saved', 'dismissed']
+const STATUS_OPTIONS = ['new', 'reviewing', 'contacted', 'booked', 'follow_up', 'saved', 'bad_match', 'dismissed']
 
 export function LeadDrawer({ lead, onClose, onStatusChange, onBookmark, onNotesChange }: Props) {
   const [notes, setNotes] = useState(lead.operator_notes || '')

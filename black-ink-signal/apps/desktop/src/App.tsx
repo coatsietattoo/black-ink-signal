@@ -3,6 +3,7 @@ import { LeadCard } from './components/LeadCard'
 import { LeadDrawer } from './components/LeadDrawer'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
+import { AdminPanel } from './components/AdminPanel'
 import type { Lead, Filters } from './types'
 import './styles.css'
 
@@ -20,6 +21,7 @@ export function App() {
   const [loading, setLoading] = useState(false)
   const [stats, setStats] = useState({ total: 0, hot: 0, strong: 0, watchlist: 0 })
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
+  const [view, setView] = useState<'feed' | 'admin'>('feed')
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -100,7 +102,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar stats={stats} filters={filters} onFiltersChange={setFilters} />
+      <Sidebar stats={stats} filters={filters} onFiltersChange={setFilters} view={view} onViewChange={setView} />
       <div className="main-area">
         <Header
           leadCount={leads.length}
@@ -112,32 +114,40 @@ export function App() {
           onNotificationsToggle={() => setNotificationsEnabled(e => !e)}
         />
         <div className="content-area">
-          <section className="feed">
-            {leads.length === 0 && !loading && (
-              <div className="empty-state">
-                <h2>No leads match filters</h2>
-                <p>Adjust filters or wait for new data.</p>
-              </div>
-            )}
-            {leads.map(lead => (
-              <LeadCard
-                key={lead.id}
-                lead={lead}
-                isSelected={selected?.id === lead.id}
-                onSelect={() => setSelected(lead)}
-                onStatusChange={(s) => updateStatus(lead.id, s)}
-                onBookmark={() => toggleBookmark(lead.id, lead.bookmarked)}
-              />
-            ))}
-          </section>
-          {selected && (
-            <LeadDrawer
-              lead={selected}
-              onClose={() => setSelected(null)}
-              onStatusChange={(s) => updateStatus(selected.id, s)}
-              onBookmark={() => toggleBookmark(selected.id, selected.bookmarked)}
-              onNotesChange={(n) => updateNotes(selected.id, n)}
-            />
+          {view === 'admin' ? (
+            <section className="feed">
+              <AdminPanel />
+            </section>
+          ) : (
+            <>
+              <section className="feed">
+                {leads.length === 0 && !loading && (
+                  <div className="empty-state">
+                    <h2>No leads match filters</h2>
+                    <p>Adjust filters or wait for new data.</p>
+                  </div>
+                )}
+                {leads.map(lead => (
+                  <LeadCard
+                    key={lead.id}
+                    lead={lead}
+                    isSelected={selected?.id === lead.id}
+                    onSelect={() => setSelected(lead)}
+                    onStatusChange={(s) => updateStatus(lead.id, s)}
+                    onBookmark={() => toggleBookmark(lead.id, lead.bookmarked)}
+                  />
+                ))}
+              </section>
+              {selected && (
+                <LeadDrawer
+                  lead={selected}
+                  onClose={() => setSelected(null)}
+                  onStatusChange={(s) => updateStatus(selected.id, s)}
+                  onBookmark={() => toggleBookmark(selected.id, selected.bookmarked)}
+                  onNotesChange={(n) => updateNotes(selected.id, n)}
+                />
+              )}
+            </>
           )}
         </div>
       </div>

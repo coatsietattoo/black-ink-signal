@@ -7,7 +7,7 @@ const BAND_COLORS: Record<string, string> = {
   low: '#6b7280',
 }
 
-const STATUS_OPTIONS = ['new', 'reviewing', 'contacted', 'saved', 'dismissed']
+const STATUS_OPTIONS = ['new', 'reviewing', 'contacted', 'booked', 'follow_up', 'saved', 'bad_match', 'dismissed']
 
 function timeAgo(iso: string | null): string {
   if (!iso) return ''

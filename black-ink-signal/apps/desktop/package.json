@@ -2,11 +2,17 @@
   "name": "black-ink-signal-desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Black Ink Signal — lead intelligence desktop app",
+  "author": "Black Ink Signal",
+  "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "NODE_ENV=development electron electron/main.js",
+    "electron:build": "vite build && electron-builder",
+    "start": "electron electron/main.js"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -16,7 +22,32 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
     "typescript": "^5.6.2",
     "vite": "^5.4.8"
+  },
+  "build": {
+    "appId": "com.blackinksignal.desktop",
+    "productName": "Black Ink Signal",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
   }
 }

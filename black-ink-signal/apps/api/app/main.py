@@ -27,6 +27,14 @@ from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
 from black_ink_signal_core.notifications import get_recent_notifications, notify_hot_leads
 from black_ink_signal_core.ingest import ingest_reddit_items
 from black_ink_signal_core.scoring import score_lead as _score_lead_fn
+from black_ink_signal_core.semantic import TFIDFIndex
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware (UTC)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 app = FastAPI(title="Black Ink Signal", version="0.1.0")
 
@@ -57,6 +65,26 @@ _classifier = ClassifierPipeline(
     llm_api_base=os.environ.get("BIS_LLM_API_BASE", "https://api.openai.com/v1"),
     llm_model=os.environ.get("BIS_LLM_MODEL", "gpt-4o-mini"),
 )
+
+# Semantic search index (built at startup, refreshed periodically)
+_semantic_index = TFIDFIndex()
+
+def _rebuild_semantic_index():
+    """Rebuild the semantic index from all leads."""
+    global _semantic_index
+    idx = TFIDFIndex()
+    with _Session() as s:
+        leads = s.query(Lead).filter(Lead.hidden == False).all()
+        for lead in leads:
+            text = f"{lead.title or ''} {lead.body or ''} {lead.subreddit or ''}"
+            idx.add(lead.id, text)
+    idx.build()
+    _semantic_index = idx
+
+try:
+    _rebuild_semantic_index()
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +348,60 @@ def search_leads(
         return [_lead_to_out(l) for l in leads]
 
 
+@app.get("/search/semantic")
+def semantic_search(
+    q: str = Query(..., min_length=2),
+    min_score: int = 0,
+    limit: int = Query(default=20, le=100),
+):
+    """Semantic search using TF-IDF + domain-boosted cosine similarity."""
+    results = _semantic_index.search(q, top_k=limit * 2)
+    if not results:
+        return []
+
+    ids = [r["id"] for r in results]
+    sim_map = {r["id"]: r["score"] for r in results}
+
+    with _Session() as s:
+        leads = s.query(Lead).filter(Lead.id.in_(ids)).all()
+        if min_score > 0:
+            leads = [l for l in leads if l.lead_score >= min_score]
+        # Sort by similarity
+        leads.sort(key=lambda l: -sim_map.get(l.id, 0))
+        out = []
+        for l in leads[:limit]:
+            lo = _lead_to_out(l)
+            out.append({**lo.model_dump(), "similarity": sim_map.get(l.id, 0)})
+        return out
+
+
+@app.get("/leads/{lead_id}/similar")
+def similar_leads(lead_id: int, limit: int = Query(default=5, le=20)):
+    """Find leads semantically similar to a given lead."""
+    results = _semantic_index.similar(lead_id, top_k=limit)
+    if not results:
+        return []
+
+    ids = [r["id"] for r in results]
+    sim_map = {r["id"]: r["score"] for r in results}
+
+    with _Session() as s:
+        leads = s.query(Lead).filter(Lead.id.in_(ids)).all()
+        leads.sort(key=lambda l: -sim_map.get(l.id, 0))
+        out = []
+        for l in leads:
+            lo = _lead_to_out(l)
+            out.append({**lo.model_dump(), "similarity": sim_map.get(l.id, 0)})
+        return out
+
+
+@app.post("/admin/rebuild-index")
+def rebuild_index():
+    """Rebuild the semantic search index."""
+    _rebuild_semantic_index()
+    return {"status": "ok", "indexed_docs": _semantic_index.size}
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
@@ -437,6 +519,109 @@ def daily_summary():
         "top_keywords": [{"keyword": k, "count": v} for k, v in top_keywords],
         "top_sources": [{"source": k, "count": v} for k, v in top_sources],
         "top_intents": [{"intent": k, "count": v} for k, v in top_intents],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Trend Engine
+# ---------------------------------------------------------------------------
+
+@app.get("/stats/trends")
+def trends(days: int = Query(default=7, le=30)):
+    """Trend analysis: rising keywords, styles, busiest times, geo clusters."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+    mid = now - timedelta(days=days // 2)
+
+    with _Session() as s:
+        recent = s.query(Lead).filter(Lead.fetched_at >= cutoff, Lead.hidden == False).all()
+
+    if not recent:
+        return {"period_days": days, "total_leads": 0}
+
+    first_half = [l for l in recent if l.fetched_at and _to_utc(l.fetched_at) < mid]
+    second_half = [l for l in recent if l.fetched_at and _to_utc(l.fetched_at) >= mid]
+
+    def _kw_counts(leads: list) -> dict[str, int]:
+        c: dict[str, int] = {}
+        for l in leads:
+            if l.keyword_trigger:
+                for kw in l.keyword_trigger.split(";"):
+                    kw = kw.strip()
+                    if kw:
+                        c[kw] = c.get(kw, 0) + 1
+        return c
+
+    # Rising keywords: compare first half vs second half
+    kw1 = _kw_counts(first_half)
+    kw2 = _kw_counts(second_half)
+    all_kws = set(kw1) | set(kw2)
+    rising = []
+    for kw in all_kws:
+        c1 = kw1.get(kw, 0)
+        c2 = kw2.get(kw, 0)
+        if c2 > c1:
+            rising.append({"keyword": kw, "before": c1, "after": c2, "change": c2 - c1})
+    rising.sort(key=lambda x: -x["change"])
+
+    # Style distribution
+    style_counts: dict[str, int] = {}
+    for l in recent:
+        if l.semantic_label:
+            style_counts[l.semantic_label] = style_counts.get(l.semantic_label, 0) + 1
+    styles = sorted(style_counts.items(), key=lambda x: -x[1])
+
+    # Busiest sources
+    src_counts: dict[str, int] = {}
+    for l in recent:
+        if l.subreddit:
+            src_counts[l.subreddit] = src_counts.get(l.subreddit, 0) + 1
+    sources = sorted(src_counts.items(), key=lambda x: -x[1])
+
+    # Busiest hours (UTC)
+    hour_counts = [0] * 24
+    for l in recent:
+        if l.created_at:
+            h = l.created_at.hour if hasattr(l.created_at, 'hour') else 0
+            hour_counts[h] += 1
+    peak_hour = max(range(24), key=lambda h: hour_counts[h])
+
+    # Busiest day of week
+    dow_counts = [0] * 7
+    dow_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    for l in recent:
+        if l.created_at:
+            try:
+                dow_counts[l.created_at.weekday()] += 1
+            except Exception:
+                pass
+    peak_day = dow_names[max(range(7), key=lambda d: dow_counts[d])]
+
+    # Geo clusters
+    geo_counts: dict[str, int] = {}
+    for l in recent:
+        if l.geo_estimate:
+            geo_counts[l.geo_estimate] = geo_counts.get(l.geo_estimate, 0) + 1
+    geos = sorted(geo_counts.items(), key=lambda x: -x[1])
+
+    # Score distribution
+    band_counts = {"hot": 0, "strong": 0, "watchlist": 0, "low": 0}
+    for l in recent:
+        b = score_band(l.lead_score)
+        band_counts[b] = band_counts.get(b, 0) + 1
+
+    return {
+        "period_days": days,
+        "total_leads": len(recent),
+        "rising_keywords": rising[:10],
+        "intent_distribution": [{"intent": k, "count": v} for k, v in styles[:10]],
+        "busiest_sources": [{"source": k, "count": v} for k, v in sources[:5]],
+        "peak_hour_utc": peak_hour,
+        "hourly_distribution": hour_counts,
+        "peak_day": peak_day,
+        "daily_distribution": {dow_names[i]: dow_counts[i] for i in range(7)},
+        "geo_clusters": [{"location": k, "count": v} for k, v in geos[:5]],
+        "score_bands": band_counts,
     }
 
 

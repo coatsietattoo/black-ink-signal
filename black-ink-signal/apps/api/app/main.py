@@ -40,6 +40,17 @@ app.add_middleware(
 _engine = get_engine()
 _Session = get_session_factory(_engine)
 
+# Auto-migrate: add booked_value column if missing
+try:
+    import sqlalchemy as _sa
+    with _engine.connect() as _conn:
+        _cols = [row[1] for row in _conn.execute(_sa.text("PRAGMA table_info(leads)")).fetchall()]
+        if "booked_value" not in _cols:
+            _conn.execute(_sa.text("ALTER TABLE leads ADD COLUMN booked_value TEXT"))
+            _conn.commit()
+except Exception:
+    pass
+
 # Classifier pipeline — rule-based always, LLM if BIS_LLM_API_KEY is set
 _classifier = ClassifierPipeline(
     llm_api_key=os.environ.get("BIS_LLM_API_KEY"),
@@ -591,3 +602,249 @@ def admin_clear_all():
         s.query(SourceRun).delete()
         s.commit()
     return {"deleted": count}
+
+
+@app.get("/admin/dedup-report")
+def dedup_report():
+    """Show how deduplication works and current stats."""
+    with _Session() as s:
+        total_leads = s.query(Lead).count()
+        unique_sources = s.query(Lead.source_item_id).distinct().count()
+
+        # Count skipped items from recent source runs
+        recent_runs = (
+            s.query(SourceRun)
+            .filter(SourceRun.source == "reddit")
+            .order_by(SourceRun.started_at.desc())
+            .limit(20)
+            .all()
+        )
+        total_seen = sum(r.items_seen or 0 for r in recent_runs)
+        total_added = sum(r.items_added or 0 for r in recent_runs)
+        total_updated = sum(r.items_updated or 0 for r in recent_runs)
+        total_skipped = total_seen - total_added - total_updated
+
+    return {
+        "method": "dedupe_key = source:item_id (e.g. reddit:t3_abc123)",
+        "description": "Each lead has a unique dedupe_key. On ingestion, if a lead with the same key exists: "
+                        "if engagement changed, the score is recalculated (counted as 'updated'); "
+                        "otherwise the item is skipped. Items scoring below 5 are filtered out entirely.",
+        "database": {
+            "total_leads": total_leads,
+            "unique_source_ids": unique_sources,
+        },
+        "recent_runs": {
+            "runs_checked": len(recent_runs),
+            "total_seen": total_seen,
+            "total_added": total_added,
+            "total_updated": total_updated,
+            "total_skipped": total_skipped,
+            "dedup_rate": f"{(total_skipped / total_seen * 100):.1f}%" if total_seen > 0 else "n/a",
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Contact Script Generator
+# ---------------------------------------------------------------------------
+
+def _generate_scripts(lead) -> dict:
+    """Generate 3 human-written reply options for a lead (rule-based, no LLM needed)."""
+    name = lead.author_handle or "there"
+    title = lead.title or ""
+    label = (lead.semantic_label or "").lower()
+    city = lead.geo_estimate or "your area"
+    style = lead.style_interest or "your style"
+    project = lead.project_size or "your project"
+
+    # Determine context tokens
+    is_coverup = "coverup" in label or "cover" in title.lower()
+    is_memorial = "memorial" in label or "memorial" in title.lower() or "tribute" in title.lower()
+    is_first = "first" in label or "first tattoo" in title.lower()
+    is_sleeve = "sleeve" in title.lower() or "large" in label
+    is_seeking = "looking" in label or "artist" in label or "seeking" in label
+
+    # Build context-aware scripts
+    if is_memorial:
+        soft = (f"Hey {name}, I saw your post about the memorial piece. That kind of work is really personal "
+                f"and I'd want to make sure it's done right. Happy to chat about ideas whenever you're ready — no rush.")
+        direct = (f"Hi {name}, memorial tattoos are something I take a lot of care with. I'd love to sit down "
+                  f"and talk through your vision. Want to set up a free consultation?")
+        casual = (f"Yo {name}, just saw your post. Memorial pieces are some of my favorite work to do — "
+                  f"there's something about getting that story right on skin. Hit me up if you want to talk designs.")
+    elif is_coverup:
+        soft = (f"Hey {name}, I noticed you're looking into a cover-up. Those can be tricky but also really "
+                f"rewarding when done right. I've done a few similar pieces — happy to take a look if you want.")
+        direct = (f"Hi {name}, cover-ups are a specialty of mine. I can usually work with most existing pieces. "
+                  f"Send me a photo and I'll give you honest feedback on what's possible.")
+        casual = (f"Yo {name}, cover-ups are actually my jam. The puzzle of turning something old into something "
+                  f"great is half the fun. Drop me a pic and let's figure it out.")
+    elif is_first:
+        soft = (f"Hey {name}, congrats on thinking about your first tattoo! It's totally normal to have a ton of questions. "
+                f"I'm around if you want to talk through sizing, placement, style — whatever's on your mind.")
+        direct = (f"Hi {name}, first tattoos are exciting! I've walked a lot of people through their first piece. "
+                  f"Happy to do a quick free consult to help you figure out exactly what you want.")
+        casual = (f"Yo {name}, first tattoo hype! Everyone's nervous before their first one and then they're "
+                  f"already planning the second one by the time they leave. Let's make it a good one.")
+    elif is_sleeve:
+        soft = (f"Hey {name}, saw your post about the sleeve. Big projects like that are my favorite — "
+                f"there's room to really build something that flows. Happy to chat about concepts.")
+        direct = (f"Hi {name}, I specialize in larger pieces and full sleeves. Let's set up a consultation "
+                  f"to map out the design, timeline, and sessions. No commitment.")
+        casual = (f"Yo {name}, a full sleeve? Now we're talking. That's the kind of project I live for. "
+                  f"Let's grab a coffee and sketch some ideas.")
+    elif is_seeking:
+        soft = (f"Hey {name}, I saw you're looking for an artist in {city}. I'd love to chat about "
+                f"what you have in mind — always happy to show portfolio work that matches your vibe.")
+        direct = (f"Hi {name}, I'm an artist based in {city} and your project sounds like a great fit. "
+                  f"Check out my portfolio and let me know if you'd like to set up a consultation.")
+        casual = (f"Yo {name}, artist in {city} here 👋 Saw your post and your idea sounds sick. "
+                  f"Check my work and hit me up if it vibes.")
+    else:
+        soft = (f"Hey {name}, I came across your post and it sounds like you have a cool idea in mind. "
+                f"I'd be happy to chat about it — no pressure, just seeing if I can help.")
+        direct = (f"Hi {name}, I'm a tattoo artist in {city} and I think I could do great work on what you're describing. "
+                  f"Want to set up a quick consultation?")
+        casual = (f"Yo {name}, just spotted your post. Sounds like a fun project — "
+                  f"I'm always down to talk tattoo ideas. DM me if you want to jam on it.")
+
+    return {
+        "soft": {"label": "Soft / Helpful", "text": soft},
+        "direct": {"label": "Direct Consultation", "text": direct},
+        "casual": {"label": "Funny / Casual", "text": casual},
+    }
+
+
+@app.get("/leads/{lead_id}/scripts")
+def lead_scripts(lead_id: int):
+    """Generate 3 contact script options for a lead."""
+    with _Session() as s:
+        lead = s.query(Lead).filter_by(id=lead_id).first()
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        return _generate_scripts(lead)
+
+
+# ---------------------------------------------------------------------------
+# Booked Value
+# ---------------------------------------------------------------------------
+
+VALID_BOOKED_VALUES = {"small", "half_day", "full_day", "sleeve_project"}
+
+
+class BookedValueUpdate(BaseModel):
+    value: str  # small|half_day|full_day|sleeve_project|custom:NNN
+
+
+@app.patch("/leads/{lead_id}/booked-value")
+def update_booked_value(lead_id: int, body: BookedValueUpdate):
+    """Set estimated value when a lead is booked."""
+    val = body.value.strip()
+    # Validate
+    if val not in VALID_BOOKED_VALUES and not val.startswith("custom:"):
+        raise HTTPException(400, f"Invalid value. Use: {', '.join(sorted(VALID_BOOKED_VALUES))} or custom:<amount>")
+    if val.startswith("custom:"):
+        try:
+            int(val.split(":", 1)[1])
+        except ValueError:
+            raise HTTPException(400, "Custom value must be custom:<integer_amount>")
+
+    with _Session() as s:
+        lead = s.query(Lead).filter_by(id=lead_id).first()
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        lead.booked_value = val
+        s.add(LeadEvent(
+            lead_id=lead_id,
+            event_type="booked_value",
+            payload_json={"value": val},
+        ))
+        s.commit()
+    return {"id": lead_id, "booked_value": val}
+
+
+@app.get("/stats/revenue")
+def revenue_stats():
+    """Revenue summary from booked leads."""
+    VALUE_MAP = {
+        "small": 150,
+        "half_day": 500,
+        "full_day": 1000,
+        "sleeve_project": 3000,
+    }
+    with _Session() as s:
+        booked = s.query(Lead).filter(Lead.lead_status == "booked", Lead.booked_value.isnot(None)).all()
+        total_value = 0
+        breakdown = {}
+        for lead in booked:
+            val = lead.booked_value
+            if val in VALUE_MAP:
+                amount = VALUE_MAP[val]
+            elif val.startswith("custom:"):
+                amount = int(val.split(":", 1)[1])
+            else:
+                amount = 0
+            total_value += amount
+            breakdown[val] = breakdown.get(val, 0) + 1
+
+        return {
+            "booked_count": len(booked),
+            "estimated_revenue": total_value,
+            "breakdown": breakdown,
+            "value_map": VALUE_MAP,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Backup / Export
+# ---------------------------------------------------------------------------
+
+from fastapi.responses import FileResponse
+import shutil
+
+
+@app.post("/admin/backup")
+def backup_database():
+    """Create a timestamped backup of the SQLite database."""
+    proj_root = Path(__file__).resolve().parents[3]
+    db_rel = os.environ.get("BIS_DB_PATH", "data/black_ink_signal.db")
+    db_path = proj_root / db_rel
+    if not db_path.exists():
+        db_path = Path(db_rel)  # Try as absolute / CWD-relative
+    if not db_path.exists():
+        raise HTTPException(404, "Database file not found")
+
+    backup_dir = db_path.parent / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_path = backup_dir / f"black_ink_signal_{ts}.db"
+    shutil.copy2(str(db_path), str(backup_path))
+
+    # Clean old backups (keep last 10)
+    backups = sorted(backup_dir.glob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in backups[10:]:
+        old.unlink()
+
+    return {
+        "status": "ok",
+        "backup_path": str(backup_path),
+        "backup_size_kb": round(backup_path.stat().st_size / 1024, 1),
+        "backups_kept": min(len(backups), 10),
+    }
+
+
+@app.get("/admin/backup/download")
+def download_database():
+    """Download the current database file."""
+    proj_root = Path(__file__).resolve().parents[3]
+    db_rel = os.environ.get("BIS_DB_PATH", "data/black_ink_signal.db")
+    db_path = proj_root / db_rel
+    if not db_path.exists():
+        db_path = Path(db_rel)
+    if not db_path.exists():
+        raise HTTPException(404, "Database file not found")
+    return FileResponse(
+        str(db_path),
+        media_type="application/x-sqlite3",
+        filename=f"black_ink_signal_{datetime.now(timezone.utc).strftime('%Y%m%d')}.db",
+    )

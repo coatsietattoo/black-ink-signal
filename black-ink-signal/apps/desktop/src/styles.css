@@ -697,3 +697,258 @@ body { background: var(--bg); }
 .action-btn--booked:hover { color: #22c55e; border-color: #22c55e; }
 .action-btn--follow_up:hover { color: #a78bfa; border-color: #a78bfa; }
 .action-btn--bad_match:hover { color: var(--hot); border-color: var(--hot); }
+
+/* Error banner */
+.error-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: rgba(239,68,68,0.15);
+  border-bottom: 1px solid rgba(239,68,68,0.3);
+  color: #fca5a5;
+  font-size: 12px;
+}
+.error-banner__icon { font-size: 16px; }
+.error-banner__btn {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 12px;
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 4px;
+  background: transparent;
+  color: #fca5a5;
+  cursor: pointer;
+}
+.error-banner__btn:hover { background: rgba(239,68,68,0.2); }
+
+/* Onboarding */
+.onboarding {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 40px;
+}
+.onboarding__card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px;
+  max-width: 520px;
+  width: 100%;
+}
+.onboarding__header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.onboarding__header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 8px 0 4px;
+}
+.onboarding__header .brand__icon {
+  font-size: 28px;
+  color: var(--accent);
+}
+.onboarding__subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.onboarding__checklist h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.onboarding__item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+}
+.onboarding__item--done { border-color: rgba(34,197,94,0.3); }
+.onboarding__item--warn { border-color: rgba(245,158,11,0.3); }
+.onboarding__item--pending { border-color: var(--border); }
+.onboarding__check {
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.onboarding__item--done .onboarding__check { color: #22c55e; }
+.onboarding__item--warn .onboarding__check { color: #f59e0b; font-weight: bold; }
+.onboarding__item-title { font-size: 13px; font-weight: 600; }
+.onboarding__item-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.onboarding__item-desc a { color: var(--accent); text-decoration: none; }
+.onboarding__item-desc a:hover { text-decoration: underline; }
+.onboarding__code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: var(--surface-2);
+  padding: 8px;
+  border-radius: 4px;
+  margin: 6px 0;
+  display: block;
+  white-space: pre;
+}
+.onboarding__seed-btn {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  margin-top: 4px;
+}
+.onboarding__seed-btn:hover { background: rgba(168,127,255,0.1); }
+.onboarding__seed-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.onboarding__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+.onboarding__btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.onboarding__btn:hover { border-color: var(--accent); }
+.onboarding__btn:disabled { opacity: 0.5; }
+.onboarding__btn--primary {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.onboarding__btn--primary:hover { opacity: 0.9; }
+.onboarding__note {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* Contact scripts */
+.drawer__scripts-btn {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+.drawer__scripts-btn:hover { opacity: 0.8; }
+
+.scripts-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.script-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+.script-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.script-card__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-weight: 600;
+}
+.script-card__copy {
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.script-card__copy:hover { background: rgba(255,255,255,0.05); }
+.script-card__text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  margin: 0;
+}
+
+/* Booked value */
+.booked-value-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.booked-value-btn {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.booked-value-btn:hover { border-color: #22c55e; color: #22c55e; }
+.booked-value-btn--active {
+  border-color: #22c55e;
+  background: rgba(34,197,94,0.1);
+  color: #22c55e;
+  font-weight: 600;
+}
+.booked-value-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.booked-value-custom {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.booked-value-input {
+  flex: 1;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+.booked-value-input:focus { border-color: var(--accent); }

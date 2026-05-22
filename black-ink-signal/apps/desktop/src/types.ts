@@ -25,6 +25,7 @@ export interface Lead {
   bookmarked: boolean
   hidden: boolean
   operator_notes: string | null
+  booked_value: string | null
   score_ups: number | null
   num_comments: number | null
   score_band: string

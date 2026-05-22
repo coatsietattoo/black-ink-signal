@@ -49,6 +49,7 @@ class Lead(Base):
     bookmarked = Column(Boolean, nullable=False, default=False)
     hidden = Column(Boolean, nullable=False, default=False)
     operator_notes = Column(Text, nullable=True)
+    booked_value = Column(String(64), nullable=True)  # small|half_day|full_day|sleeve_project|custom:NNN
 
     # Dedup
     dedupe_key = Column(String(512), nullable=False, unique=True)

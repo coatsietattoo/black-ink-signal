@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Lead } from '../types'
+
+const API = 'http://127.0.0.1:8787'
 
 interface Props {
   lead: Lead
@@ -9,16 +11,67 @@ interface Props {
   onNotesChange: (notes: string) => void
 }
 
+interface Scripts {
+  soft: { label: string; text: string }
+  direct: { label: string; text: string }
+  casual: { label: string; text: string }
+}
+
 const STATUS_OPTIONS = ['new', 'reviewing', 'contacted', 'booked', 'follow_up', 'saved', 'bad_match', 'dismissed']
+const VALUE_OPTIONS = [
+  { value: 'small', label: 'Small tattoo (~$150)' },
+  { value: 'half_day', label: 'Half day (~$500)' },
+  { value: 'full_day', label: 'Full day (~$1,000)' },
+  { value: 'sleeve_project', label: 'Sleeve/project (~$3,000)' },
+]
 
 export function LeadDrawer({ lead, onClose, onStatusChange, onBookmark, onNotesChange }: Props) {
   const [notes, setNotes] = useState(lead.operator_notes || '')
   const [notesSaved, setNotesSaved] = useState(false)
+  const [scripts, setScripts] = useState<Scripts | null>(null)
+  const [scriptsOpen, setScriptsOpen] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
+  const [bookedValue, setBookedValue] = useState(lead.booked_value || '')
+  const [customAmount, setCustomAmount] = useState('')
+
+  useEffect(() => {
+    setNotes(lead.operator_notes || '')
+    setBookedValue(lead.booked_value || '')
+    setScripts(null)
+    setScriptsOpen(false)
+  }, [lead.id])
 
   const saveNotes = () => {
     onNotesChange(notes)
     setNotesSaved(true)
     setTimeout(() => setNotesSaved(false), 1500)
+  }
+
+  const loadScripts = async () => {
+    if (scripts) { setScriptsOpen(!scriptsOpen); return }
+    try {
+      const res = await fetch(`${API}/leads/${lead.id}/scripts`)
+      const data = await res.json()
+      setScripts(data)
+      setScriptsOpen(true)
+    } catch {}
+  }
+
+  const copyScript = (text: string, key: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(key)
+    setTimeout(() => setCopied(null), 1500)
+  }
+
+  const saveBookedValue = async (val: string) => {
+    setBookedValue(val)
+    try {
+      await fetch(`${API}/leads/${lead.id}/booked-value`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: val }),
+      })
+    } catch {}
   }
 
   return (
@@ -94,6 +147,28 @@ export function LeadDrawer({ lead, onClose, onStatusChange, onBookmark, onNotesC
         </div>
       )}
 
+      {/* Contact Scripts */}
+      <div className="drawer__section">
+        <button className="drawer__scripts-btn" onClick={loadScripts}>
+          {scriptsOpen ? '▾' : '▸'} Contact Scripts
+        </button>
+        {scriptsOpen && scripts && (
+          <div className="scripts-panel">
+            {(['soft', 'direct', 'casual'] as const).map(key => (
+              <div key={key} className="script-card">
+                <div className="script-card__header">
+                  <span className="script-card__label">{scripts[key].label}</span>
+                  <button className="script-card__copy" onClick={() => copyScript(scripts[key].text, key)}>
+                    {copied === key ? '✓' : '📋'}
+                  </button>
+                </div>
+                <p className="script-card__text">{scripts[key].text}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="drawer__section">
         <div className="drawer__label">Status</div>
         <div className="drawer__status-buttons">
@@ -108,6 +183,40 @@ export function LeadDrawer({ lead, onClose, onStatusChange, onBookmark, onNotesC
           ))}
         </div>
       </div>
+
+      {/* Booked Value */}
+      {(lead.lead_status === 'booked' || bookedValue) && (
+        <div className="drawer__section">
+          <div className="drawer__label">Booked Value</div>
+          <div className="booked-value-options">
+            {VALUE_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                className={`booked-value-btn ${bookedValue === opt.value ? 'booked-value-btn--active' : ''}`}
+                onClick={() => saveBookedValue(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+            <div className="booked-value-custom">
+              <input
+                type="number"
+                placeholder="Custom $"
+                value={customAmount}
+                onChange={(e) => setCustomAmount(e.target.value)}
+                className="booked-value-input"
+              />
+              <button
+                className="booked-value-btn"
+                onClick={() => { if (customAmount) saveBookedValue(`custom:${customAmount}`) }}
+                disabled={!customAmount}
+              >
+                Set
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="drawer__section">
         <div className="drawer__label">Operator Notes</div>

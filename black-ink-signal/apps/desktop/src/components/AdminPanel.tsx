@@ -40,9 +40,16 @@ interface DailySummary {
   top_intents: { intent: string; count: number }[]
 }
 
+interface Revenue {
+  booked_count: number
+  estimated_revenue: number
+  breakdown: Record<string, number>
+}
+
 export function AdminPanel() {
   const [health, setHealth] = useState<SourceHealth | null>(null)
   const [daily, setDaily] = useState<DailySummary | null>(null)
+  const [revenue, setRevenue] = useState<Revenue | null>(null)
   const [actionLog, setActionLog] = useState<string[]>([])
   const [loading, setLoading] = useState<string | null>(null)
 
@@ -57,6 +64,10 @@ export function AdminPanel() {
     try {
       const res = await fetch(`${API}/stats/daily`)
       setDaily(await res.json())
+    } catch {}
+    try {
+      const res = await fetch(`${API}/stats/revenue`)
+      setRevenue(await res.json())
     } catch {}
   }, [])
 
@@ -217,6 +228,20 @@ export function AdminPanel() {
               ))}
             </div>
           )}
+
+          {revenue && revenue.booked_count > 0 && (
+            <div className="daily-list">
+              <div className="daily-list__title">Revenue (Booked)</div>
+              <div className="daily-list__item">
+                <span>Booked leads</span>
+                <span className="daily-list__count">{revenue.booked_count}</span>
+              </div>
+              <div className="daily-list__item">
+                <span>Estimated revenue</span>
+                <span className="daily-list__count">${revenue.estimated_revenue.toLocaleString()}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -241,6 +266,15 @@ export function AdminPanel() {
           </button>
           <button className="admin-btn admin-btn--danger" onClick={() => runAction('/admin/clear-demo', 'DELETE', 'Clear Demo')} disabled={!!loading}>
             🗑 Clear Demo Data
+          </button>
+          <button className="admin-btn" onClick={() => runAction('/admin/backup', 'POST', 'Backup')} disabled={!!loading}>
+            💾 Backup Database
+          </button>
+          <button className="admin-btn" onClick={() => window.open(`${API}/admin/backup/download`, '_blank')} disabled={!!loading}>
+            ⬇ Download DB
+          </button>
+          <button className="admin-btn" onClick={() => runAction('/admin/dedup-report', 'GET', 'Dedup Report')} disabled={!!loading}>
+            🔍 Dedup Report
           </button>
         </div>
       </div>

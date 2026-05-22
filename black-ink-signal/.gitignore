@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Database
+*.db
+data/backups/
+
+# Build output
+apps/desktop/dist/
+apps/desktop/release/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

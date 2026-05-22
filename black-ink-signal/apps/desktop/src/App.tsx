@@ -4,6 +4,7 @@ import { LeadDrawer } from './components/LeadDrawer'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
 import { AdminPanel } from './components/AdminPanel'
+import { OnboardingScreen } from './components/OnboardingScreen'
 import type { Lead, Filters } from './types'
 import './styles.css'
 
@@ -22,6 +23,8 @@ export function App() {
   const [stats, setStats] = useState({ total: 0, hot: 0, strong: 0, watchlist: 0 })
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
   const [view, setView] = useState<'feed' | 'admin'>('feed')
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [apiError, setApiError] = useState<string | null>(null)
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -33,6 +36,7 @@ export function App() {
       params.set('limit', '100')
 
       const res = await fetch(`${API}/leads?${params}`)
+      if (!res.ok) throw new Error(`API returned ${res.status}`)
       let data: Lead[] = await res.json()
 
       if (filters.search) {
@@ -46,8 +50,9 @@ export function App() {
       }
 
       setLeads(data)
-    } catch (e) {
-      console.error('Failed to fetch leads', e)
+      setApiError(null)
+    } catch (e: any) {
+      setApiError(e.message || 'Cannot reach API')
     } finally {
       setLoading(false)
     }
@@ -61,6 +66,22 @@ export function App() {
   }, [])
 
   useEffect(() => { fetchLeads(); fetchStats() }, [fetchLeads, fetchStats])
+
+  // Check if first run (no leads and possible missing OAuth)
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const res = await fetch(`${API}/sources/health`)
+        const data = await res.json()
+        const noOAuth = !data.reddit?.oauth_configured
+        const noLeads = (data.database?.total_leads || 0) === 0
+        if (noOAuth && noLeads) setShowOnboarding(true)
+      } catch {
+        setShowOnboarding(true)
+      }
+    }
+    checkOnboarding()
+  }, [])
 
   // Auto-refresh every 30s
   useEffect(() => {
@@ -100,8 +121,19 @@ export function App() {
     })
   }
 
+  if (showOnboarding) {
+    return <OnboardingScreen onDismiss={() => { setShowOnboarding(false); fetchLeads(); fetchStats() }} />
+  }
+
   return (
     <div className="app-shell">
+      {apiError && (
+        <div className="error-banner">
+          <span className="error-banner__icon">⚠</span>
+          <span>API unreachable: {apiError}</span>
+          <button className="error-banner__btn" onClick={() => { fetchLeads(); fetchStats() }}>Retry</button>
+        </div>
+      )}
       <Sidebar stats={stats} filters={filters} onFiltersChange={setFilters} view={view} onViewChange={setView} />
       <div className="main-area">
         <Header

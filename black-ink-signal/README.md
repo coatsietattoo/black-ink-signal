@@ -1,51 +1,112 @@
 # Black Ink Signal
 
-Black Ink Signal is a compliance-first desktop lead intelligence system for tattoo studios.
+Desktop lead intelligence system for tattoo studios. Compliance-first, public-only.
 
-## MVP v1 scope
-- Reddit public-source connector
-- SQLite database
-- Lead scoring system
-- Desktop live feed
-- Manual review/contact status buttons
-- No auto-messaging
+## Architecture
 
-## Principles
-- Public sources only
-- No authentication bypass
-- No scraping of private spaces
-- Respect rate limits and platform rules
-- Human-reviewed workflow only
+```
+┌───────────────────────────────────────────────────────┐
+│  Electron Desktop App (React + Vite)                  │
+│  ├── Live Feed       ├── Lead Drawer                  │
+│  ├── Filters/Search  ├── Notifications                │
+│  └── Status Buttons  └── CSV Export                   │
+└──────────────────────┬────────────────────────────────┘
+                       │ HTTP (localhost:8787)
+┌──────────────────────▼────────────────────────────────┐
+│  FastAPI Backend                                       │
+│  ├── /leads          ├── /search                      │
+│  ├── /leads/{id}/*   ├── /enrich/batch                │
+│  ├── /notifications  ├── /export/csv                  │
+│  └── /stats          └── /health                      │
+└──────────────────────┬────────────────────────────────┘
+                       │
+┌──────────────────────▼────────────────────────────────┐
+│  Core Engine                                           │
+│  ├── Scoring v2 (keyword + geo + project + urgency)   │
+│  ├── Classifier (rule-based + optional LLM)           │
+│  ├── Ingestion pipeline (normalize → dedupe → score)  │
+│  └── Notification manager (desktop + in-app)          │
+└──────────────────────┬────────────────────────────────┘
+                       │
+┌──────────────────────▼────────────────────────────────┐
+│  Connectors (isolated, modular)                        │
+│  └── Reddit (public JSON + OAuth2)                    │
+└──────────────────────┬────────────────────────────────┘
+                       │
+┌──────────────────────▼────────────────────────────────┐
+│  Storage                                               │
+│  └── SQLite (leads, events, source_runs)              │
+└───────────────────────────────────────────────────────┘
+```
 
-## Monorepo layout
-- `apps/api` - FastAPI backend
-- `apps/desktop` - Electron desktop shell and live feed UI
-- `packages/core` - shared Python core for schema, DB, scoring
-- `packages/connectors/reddit` - Reddit public-source connector stub
-- `data` - local runtime data
-- `docs` - architecture and compliance notes
+## Quick Start
 
-## Quick start
-Backend:
+### Backend
 ```bash
 cd apps/api
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+export PYTHONPATH="../../packages/core:../../packages/connectors/reddit"
+
+# Seed test data (first time)
+python3 app/seed_data.py
+
+# Start API
+uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload
 ```
 
-Desktop:
+### Background Scheduler
+```bash
+cd apps/api
+export PYTHONPATH="../../packages/core:../../packages/connectors/reddit"
+python3 app/scheduler.py
+```
+
+### Desktop (development)
 ```bash
 cd apps/desktop
-npm install
-npm run dev
+NODE_ENV=development npm install
+npm run dev        # Vite dev server at localhost:5173
 ```
 
-## Current status
-This repo currently includes:
-- initial skeleton
-- SQLite schema bootstrap
-- scoring engine
-- Reddit connector stub
-- desktop feed scaffold
+### Desktop (Electron)
+```bash
+cd apps/desktop
+NODE_ENV=development npm install
+npm run build                   # Build Vite
+npm run electron:dev            # Dev mode with DevTools
+npm run electron:build          # Package for distribution
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+| Variable | Default | Description |
+|---|---|---|
+| BIS_REDDIT_CLIENT_ID | (none) | Reddit script app client ID |
+| BIS_REDDIT_CLIENT_SECRET | (none) | Reddit script app secret |
+| BIS_REDDIT_USERNAME | (none) | Reddit account username |
+| BIS_REDDIT_PASSWORD | (none) | Reddit account password |
+| BIS_REDDIT_INTERVAL | 5 | Minutes between Reddit polls |
+| BIS_ENRICHMENT_INTERVAL | 2 | Minutes between enrichment batches |
+| BIS_HOT_LEAD_THRESHOLD | 80 | Score threshold for notifications |
+| BIS_LLM_API_KEY | (none) | OpenAI-compatible API key for deep enrichment |
+| BIS_LLM_MODEL | gpt-4o-mini | LLM model for enrichment |
+
+## Score Bands
+
+| Score | Band | Meaning |
+|---|---|---|
+| 85-100 | 🔥 Hot | Explicit local buying intent |
+| 80-84 | 🔥 Hot | Coverup/sleeve/memorial + local |
+| 60-79 | 🟡 Strong | Style search + local, or intent + geo |
+| 40-59 | 🔵 Watchlist | Intent without location |
+| 1-39 | ⚫ Low | General discussion, memes, show-offs |
+
+## Compliance
+
+- Public sources only
+- No authentication bypass
+- Rate-limited (1-2s between requests)
+- No automated messaging
+- Manual review required before any outreach

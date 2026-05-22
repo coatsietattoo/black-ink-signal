@@ -21,6 +21,7 @@ from black_ink_signal_core.models import Lead, LeadEvent, SourceRun
 from black_ink_signal_core.scoring import score_band
 from black_ink_signal_core.enrichment import enrich_lead, enrich_all_pending
 from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
+from black_ink_signal_core.notifications import get_recent_notifications, notify_hot_leads
 
 app = FastAPI(title="Black Ink Signal", version="0.1.0")
 
@@ -336,3 +337,20 @@ def stats():
         strong = s.query(Lead).filter(Lead.lead_score >= 60, Lead.lead_score < 80).count()
         watchlist = s.query(Lead).filter(Lead.lead_score >= 40, Lead.lead_score < 60).count()
         return {"total": total, "hot": hot, "strong": strong, "watchlist": watchlist}
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+@app.get("/notifications")
+def list_notifications(limit: int = Query(default=20, le=50)):
+    return get_recent_notifications(limit=limit)
+
+
+@app.post("/notifications/trigger")
+def trigger_notifications():
+    """Manually trigger hot lead notifications check."""
+    with _Session() as s:
+        sent = notify_hot_leads(s)
+        return {"notifications_sent": sent}

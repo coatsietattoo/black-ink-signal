@@ -28,6 +28,7 @@ from black_ink_signal_core.models import SourceRun
 from black_ink_signal_core.ingest import ingest_reddit_items
 from black_ink_signal_core.enrichment import enrich_all_pending
 from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
+from black_ink_signal_core.notifications import notify_hot_leads
 from connector import RedditConnector
 
 logging.basicConfig(
@@ -91,6 +92,10 @@ def reddit_fetch_job():
 
             stats = ingest_reddit_items(session, items, source_run=run)
             logger.info(f"Ingest: added={stats['added']} updated={stats['updated']} skipped={stats['skipped']}")
+
+            # Notify on hot leads
+            if stats['added'] > 0:
+                notify_hot_leads(session)
 
     except Exception as e:
         logger.error(f"Reddit fetch failed: {e}", exc_info=True)

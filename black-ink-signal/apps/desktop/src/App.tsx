@@ -19,6 +19,7 @@ export function App() {
   })
   const [loading, setLoading] = useState(false)
   const [stats, setStats] = useState({ total: 0, hot: 0, strong: 0, watchlist: 0 })
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true)
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -107,6 +108,8 @@ export function App() {
           onRefresh={() => { fetchLeads(); fetchStats() }}
           search={filters.search}
           onSearchChange={(s) => setFilters(f => ({ ...f, search: s }))}
+          notificationsEnabled={notificationsEnabled}
+          onNotificationsToggle={() => setNotificationsEnabled(e => !e)}
         />
         <div className="content-area">
           <section className="feed">

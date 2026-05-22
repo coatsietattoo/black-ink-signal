@@ -99,15 +99,44 @@ class LeadOut(BaseModel):
     bookmarked: bool
     hidden: bool
     operator_notes: Optional[str]
+    booked_value: Optional[str]
     score_ups: Optional[int]
     num_comments: Optional[int]
     score_band: str
+    score_breakdown: Optional[dict]
 
     class Config:
         from_attributes = True
 
 
 def _lead_to_out(lead: Lead) -> LeadOut:
+    # Compute live score breakdown
+    breakdown = _score_lead_fn(
+        title=lead.title or "",
+        body=lead.body or "",
+        subreddit=lead.subreddit or "",
+        created_at=lead.created_at,
+        score_ups=lead.score_ups,
+        num_comments=lead.num_comments,
+    )
+    breakdown_dict = {
+        "base_intent": breakdown.base_intent,
+        "geo_bonus": breakdown.geo_bonus,
+        "project_bonus": breakdown.project_bonus,
+        "urgency_bonus": breakdown.urgency_bonus,
+        "engagement_bonus": breakdown.engagement_bonus,
+        "recency_bonus": breakdown.recency_bonus,
+        "collector_bonus": breakdown.collector_bonus,
+        "coverup_bonus": breakdown.coverup_bonus,
+        "memorial_bonus": breakdown.memorial_bonus,
+        "penalty": breakdown.penalty,
+        "total": breakdown.total,
+        "keyword_trigger": breakdown.keyword_trigger,
+        "semantic_label": breakdown.semantic_label,
+        "geo_estimate": breakdown.geo_estimate,
+        "geo_confidence": breakdown.geo_confidence,
+    }
+
     return LeadOut(
         id=lead.id,
         source=lead.source,
@@ -135,9 +164,11 @@ def _lead_to_out(lead: Lead) -> LeadOut:
         bookmarked=lead.bookmarked,
         hidden=lead.hidden,
         operator_notes=lead.operator_notes,
+        booked_value=lead.booked_value,
         score_ups=lead.score_ups,
         num_comments=lead.num_comments,
         score_band=score_band(lead.lead_score),
+        score_breakdown=breakdown_dict,
     )
 
 

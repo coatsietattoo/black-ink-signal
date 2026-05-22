@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { Lead } from '../types'
+import { ScoreExplainer } from './ScoreExplainer'
 
 const API = 'http://127.0.0.1:8787'
 
@@ -93,6 +94,10 @@ export function LeadDrawer({ lead, onClose, onStatusChange, onBookmark, onNotesC
           {lead.bookmarked ? '★ Saved' : '☆ Save'}
         </button>
       </div>
+
+      {lead.score_breakdown && (
+        <ScoreExplainer breakdown={lead.score_breakdown} />
+      )}
 
       <div className="drawer__section">
         <div className="drawer__label">Title</div>

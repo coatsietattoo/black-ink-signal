@@ -29,6 +29,25 @@ export interface Lead {
   score_ups: number | null
   num_comments: number | null
   score_band: string
+  score_breakdown: ScoreBreakdown | null
+}
+
+export interface ScoreBreakdown {
+  base_intent: number
+  geo_bonus: number
+  project_bonus: number
+  urgency_bonus: number
+  engagement_bonus: number
+  recency_bonus: number
+  collector_bonus: number
+  coverup_bonus: number
+  memorial_bonus: number
+  penalty: number
+  total: number
+  keyword_trigger: string
+  semantic_label: string
+  geo_estimate: string
+  geo_confidence: string
 }
 
 export interface Filters {
@@ -36,4 +55,12 @@ export interface Filters {
   status: string | null
   bookmarkedOnly: boolean
   search: string
+}
+
+export interface AppPrefs {
+  compactMode: boolean
+  view: 'feed' | 'admin'
+  filters: Filters
+  selectedLeadId: number | null
+  soundEnabled: boolean
 }

@@ -8,13 +8,14 @@ interface Props {
   onSearchChange: (s: string) => void
   notificationsEnabled: boolean
   onNotificationsToggle: () => void
+  compactMode?: boolean
 }
 
-export function Header({ leadCount, loading, onRefresh, search, onSearchChange, notificationsEnabled, onNotificationsToggle }: Props) {
+export function Header({ leadCount, loading, onRefresh, search, onSearchChange, notificationsEnabled, onNotificationsToggle, compactMode }: Props) {
   return (
-    <header className="feed-header">
+    <header className={`feed-header ${compactMode ? 'feed-header--compact' : ''}`}>
       <div className="feed-header__left">
-        <h1>Live Feed</h1>
+        <h1>{compactMode ? 'BIS' : 'Live Feed'}</h1>
         <span className="lead-count">{leadCount} leads</span>
       </div>
       <div className="feed-header__right">
@@ -30,7 +31,7 @@ export function Header({ leadCount, loading, onRefresh, search, onSearchChange, 
           onToggle={onNotificationsToggle}
         />
         <button className="refresh-btn" onClick={onRefresh} disabled={loading}>
-          {loading ? '⟳' : '↻'} {loading ? 'Loading' : 'Refresh'}
+          {loading ? '⟳' : '↻'} {compactMode ? '' : loading ? 'Loading' : 'Refresh'}
         </button>
       </div>
     </header>

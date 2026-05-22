@@ -952,3 +952,91 @@ body { background: var(--bg); }
   outline: none;
 }
 .booked-value-input:focus { border-color: var(--accent); }
+
+/* New lead slide-in animation */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes hotPulse {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(239,68,68,0); }
+  50% { box-shadow: inset 0 0 12px 0 rgba(239,68,68,0.08); }
+}
+.lead-card--new {
+  animation: slideIn 0.4s ease-out;
+}
+.lead-card--hot-pulse {
+  animation: hotPulse 3s ease-in-out infinite;
+}
+
+/* Compact mode */
+.app-shell--compact .sidebar { width: 180px; min-width: 180px; padding: 12px; }
+.app-shell--compact .brand { font-size: 12px; }
+.app-shell--compact .stats-panel { gap: 4px; }
+.app-shell--compact .stat__value { font-size: 16px; }
+.app-shell--compact .stat__label { font-size: 7px; }
+
+.lead-card--compact {
+  padding: 8px 12px;
+}
+.lead-card--compact .lead-card__title { font-size: 12px; margin: 2px 0; }
+.lead-card--compact .lead-card__top { gap: 6px; }
+.lead-card--compact .lead-score { width: 26px; height: 26px; font-size: 10px; }
+.lead-card--compact .lead-card__meta { gap: 3px; }
+.lead-card--compact .lead-tag { font-size: 8px; padding: 1px 4px; }
+
+.feed-header--compact { padding: 8px 16px; }
+.feed-header--compact h1 { font-size: 14px; }
+
+/* Activity ticker */
+.activity-ticker {
+  display: flex;
+  gap: 16px;
+  padding: 4px 20px;
+  background: rgba(168,127,255,0.04);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.ticker-item {
+  white-space: nowrap;
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Score explainer */
+.score-explainer {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 8px;
+}
+.score-explainer__title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.score-explainer__total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.score-explainer__total-value { color: var(--accent); }
+.score-explainer__factors { display: flex; flex-direction: column; gap: 3px; }
+.score-factor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.score-factor__icon { width: 16px; text-align: center; font-size: 12px; }
+.score-factor__label { flex: 1; color: var(--text-muted); }
+.score-factor__value { font-weight: 600; color: #22c55e; min-width: 28px; text-align: right; }
+.score-factor--negative .score-factor__value { color: var(--hot); }

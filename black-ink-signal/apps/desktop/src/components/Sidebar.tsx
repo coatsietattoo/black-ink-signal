@@ -6,6 +6,10 @@ interface Props {
   onFiltersChange: (f: Filters) => void
   view: 'feed' | 'admin'
   onViewChange: (v: 'feed' | 'admin') => void
+  compactMode: boolean
+  onCompactToggle: () => void
+  soundEnabled: boolean
+  onSoundToggle: () => void
 }
 
 const SCORE_BANDS = [
@@ -27,7 +31,7 @@ const STATUS_OPTIONS = [
   { label: 'Dismissed', value: 'dismissed' },
 ]
 
-export function Sidebar({ stats, filters, onFiltersChange, view, onViewChange }: Props) {
+export function Sidebar({ stats, filters, onFiltersChange, view, onViewChange, compactMode, onCompactToggle, soundEnabled, onSoundToggle }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -108,6 +112,18 @@ export function Sidebar({ stats, filters, onFiltersChange, view, onViewChange }:
                 onChange={() => onFiltersChange({ ...filters, bookmarkedOnly: !filters.bookmarkedOnly })}
               />
               Bookmarked only
+            </label>
+          </div>
+
+          <div className="filter-group">
+            <div className="filter-group__title">Display</div>
+            <label className="filter-toggle">
+              <input type="checkbox" checked={compactMode} onChange={onCompactToggle} />
+              Compact mode
+            </label>
+            <label className="filter-toggle">
+              <input type="checkbox" checked={soundEnabled} onChange={onSoundToggle} />
+              🔔 Hot lead sound
             </label>
           </div>
         </>

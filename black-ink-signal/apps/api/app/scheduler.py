@@ -30,6 +30,7 @@ from black_ink_signal_core.enrichment import enrich_all_pending
 from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
 from black_ink_signal_core.notifications import notify_hot_leads
 from connector import RedditConnector
+from oauth_connector import RedditOAuthConnector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,10 +75,26 @@ classifier = ClassifierPipeline(
 # Jobs
 # ---------------------------------------------------------------------------
 
+def _get_reddit_connector():
+    """Return OAuth connector if credentials are set, else public fallback."""
+    if REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET and REDDIT_USERNAME and REDDIT_PASSWORD:
+        logger.info("Using Reddit OAuth connector")
+        return RedditOAuthConnector(
+            client_id=REDDIT_CLIENT_ID,
+            client_secret=REDDIT_CLIENT_SECRET,
+            username=REDDIT_USERNAME,
+            password=REDDIT_PASSWORD,
+            user_agent=os.environ.get("BIS_REDDIT_USER_AGENT", "BlackInkSignal/0.1"),
+        )
+    else:
+        logger.info("Using Reddit public JSON connector (no OAuth credentials)")
+        return RedditConnector()
+
+
 def reddit_fetch_job():
     """Fetch new Reddit posts, score, and ingest."""
     logger.info("Reddit fetch starting...")
-    connector = RedditConnector()
+    connector = _get_reddit_connector()
     try:
         items = connector.fetch_all_new()
         logger.info(f"Fetched {len(items)} items from Reddit")

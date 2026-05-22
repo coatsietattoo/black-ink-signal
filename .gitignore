@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Electron
+node_modules/
+dist/
+build/
+.out/
+coverage/
+
+# Local app data
+black-ink-signal/data/*.db
+black-ink-signal/data/*.sqlite
+black-ink-signal/data/*.sqlite3
+black-ink-signal/data/checkpoints/
+black-ink-signal/data/blobs/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

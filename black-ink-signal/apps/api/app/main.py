@@ -1,12 +1,15 @@
 """Black Ink Signal — FastAPI backend."""
 
+import os
 import sys
 from pathlib import Path
 
 # Add packages to path so we can import core and connectors
 _pkg_root = Path(__file__).resolve().parents[2] / "packages"
-sys.path.insert(0, str(_pkg_root / "core"))
-sys.path.insert(0, str(_pkg_root / "connectors" / "reddit"))
+for p in [_pkg_root / "core", _pkg_root / "connectors" / "reddit"]:
+    _p = str(p)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

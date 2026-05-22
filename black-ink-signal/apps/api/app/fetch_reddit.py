@@ -5,8 +5,10 @@ import logging
 from pathlib import Path
 
 _pkg_root = Path(__file__).resolve().parents[2] / "packages"
-sys.path.insert(0, str(_pkg_root / "core"))
-sys.path.insert(0, str(_pkg_root / "connectors" / "reddit"))
+for _p in [_pkg_root / "core", _pkg_root / "connectors" / "reddit"]:
+    _ps = str(_p)
+    if _ps not in sys.path:
+        sys.path.insert(0, _ps)
 
 from black_ink_signal_core.database import get_engine, get_session_factory
 from black_ink_signal_core.models import SourceRun

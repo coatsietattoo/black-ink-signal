@@ -19,6 +19,8 @@ from typing import Optional
 from black_ink_signal_core.database import get_engine, get_session_factory
 from black_ink_signal_core.models import Lead, LeadEvent, SourceRun
 from black_ink_signal_core.scoring import score_band
+from black_ink_signal_core.enrichment import enrich_lead, enrich_all_pending
+from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
 
 app = FastAPI(title="Black Ink Signal", version="0.1.0")
 
@@ -31,6 +33,13 @@ app.add_middleware(
 
 _engine = get_engine()
 _Session = get_session_factory(_engine)
+
+# Classifier pipeline — rule-based always, LLM if BIS_LLM_API_KEY is set
+_classifier = ClassifierPipeline(
+    llm_api_key=os.environ.get("BIS_LLM_API_KEY"),
+    llm_api_base=os.environ.get("BIS_LLM_API_BASE", "https://api.openai.com/v1"),
+    llm_model=os.environ.get("BIS_LLM_MODEL", "gpt-4o-mini"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +209,119 @@ def update_notes(lead_id: int, body: NoteUpdate):
         lead.operator_notes = body.notes
         s.commit()
         return {"id": lead_id, "notes": body.notes}
+
+
+# ---------------------------------------------------------------------------
+# Enrichment
+# ---------------------------------------------------------------------------
+
+@app.post("/leads/{lead_id}/enrich")
+def enrich_single(lead_id: int):
+    with _Session() as s:
+        lead = s.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Lead not found")
+        ok = enrich_lead(s, lead_id, _classifier)
+        s.refresh(lead)
+        return {
+            "id": lead_id,
+            "enriched": ok,
+            "intent_summary": lead.intent_summary,
+            "booking_likelihood": lead.booking_likelihood,
+            "tone": lead.tone,
+            "urgency": lead.urgency,
+            "project_size": lead.project_size,
+            "style_interest": lead.style_interest,
+            "outreach_angle": lead.outreach_angle,
+        }
+
+
+@app.post("/enrich/batch")
+def enrich_batch(limit: int = Query(default=20, le=100)):
+    with _Session() as s:
+        count = enrich_all_pending(s, _classifier, limit=limit)
+        return {"enriched": count}
+
+
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+@app.get("/search", response_model=list[LeadOut])
+def search_leads(
+    q: str = Query(..., min_length=1),
+    min_score: int = 0,
+    limit: int = Query(default=50, le=200),
+):
+    with _Session() as s:
+        query = s.query(Lead).filter(Lead.hidden == False)
+        if min_score > 0:
+            query = query.filter(Lead.lead_score >= min_score)
+        # SQLite LIKE search across title, body, keyword_trigger, author
+        pattern = f"%{q}%"
+        query = query.filter(
+            (Lead.title.ilike(pattern)) |
+            (Lead.body.ilike(pattern)) |
+            (Lead.keyword_trigger.ilike(pattern)) |
+            (Lead.author_handle.ilike(pattern)) |
+            (Lead.semantic_label.ilike(pattern)) |
+            (Lead.intent_summary.ilike(pattern))
+        )
+        query = query.order_by(Lead.lead_score.desc())
+        leads = query.limit(limit).all()
+        return [_lead_to_out(l) for l in leads]
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+@app.get("/export/csv")
+def export_csv(
+    min_score: int = 0,
+    status: Optional[str] = None,
+    bookmarked_only: bool = False,
+):
+    import csv
+    import io
+    from starlette.responses import StreamingResponse
+
+    with _Session() as s:
+        q = s.query(Lead).filter(Lead.hidden == False)
+        if min_score > 0:
+            q = q.filter(Lead.lead_score >= min_score)
+        if status:
+            q = q.filter(Lead.lead_status == status)
+        if bookmarked_only:
+            q = q.filter(Lead.bookmarked == True)
+        q = q.order_by(Lead.lead_score.desc())
+        leads = q.all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "id", "score", "band", "status", "source", "subreddit", "author",
+        "title", "geo", "geo_confidence", "keyword_trigger", "semantic_label",
+        "intent_summary", "booking_likelihood", "project_size", "tone",
+        "urgency", "style_interest", "outreach_angle", "bookmarked",
+        "created_at", "url",
+    ])
+    for l in leads:
+        writer.writerow([
+            l.id, l.lead_score, score_band(l.lead_score), l.lead_status,
+            l.source, l.subreddit, l.author_handle, l.title,
+            l.geo_estimate, l.geo_confidence, l.keyword_trigger, l.semantic_label,
+            l.intent_summary, l.booking_likelihood, l.project_size, l.tone,
+            l.urgency, l.style_interest, l.outreach_angle, l.bookmarked,
+            l.created_at.isoformat() if l.created_at else "", l.canonical_url,
+        ])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=black_ink_signal_leads.csv"},
+    )
 
 
 # ---------------------------------------------------------------------------

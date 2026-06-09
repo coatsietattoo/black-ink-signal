@@ -11,12 +11,11 @@
  * First-run: shows setup flow if .env is missing Reddit credentials.
  */
 
-import { app, BrowserWindow, Tray, Menu, Notification, nativeImage, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, dialog, ipcMain, shell } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { createServer } from 'net';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,19 +25,29 @@ const __dirname = dirname(__filename);
 // ---------------------------------------------------------------------------
 
 const isDev = process.env.NODE_ENV === 'development';
-const APP_ROOT = isDev
-  ? join(__dirname, '..')
-  : join(process.resourcesPath, 'app');
+const APP_ROOT = join(__dirname, '..');
+const RESOURCES_ROOT = process.resourcesPath;
 const PROJECT_ROOT = isDev
-  ? join(__dirname, '..', '..')  // black-ink-signal/
-  : join(app.getPath('userData'), 'engine');
+  ? join(__dirname, '..', '..', '..')
+  : join(process.resourcesPath, 'app');
 const API_DIR = join(PROJECT_ROOT, 'apps', 'api');
-const DATA_DIR = join(PROJECT_ROOT, 'data');
-const ENV_FILE = join(PROJECT_ROOT, '.env');
+const DATA_DIR = isDev
+  ? join(PROJECT_ROOT, 'data')
+  : join(app.getPath('userData'), 'data');
+const ENV_FILE = isDev
+  ? join(PROJECT_ROOT, '.env')
+  : join(app.getPath('userData'), '.env');
+const ENV_TEMPLATE_FILE = join(PROJECT_ROOT, '.env.example');
 const DEV_URL = 'http://localhost:5173';
 const PROD_HTML = join(APP_ROOT, 'dist', 'index.html');
-const API_PORT = parseInt(process.env.BIS_API_PORT || '8787');
+const API_PORT = parseInt(process.env.BIS_API_PORT || '8787', 10);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
+const DEV_PYTHON_CANDIDATES = [
+  join(PROJECT_ROOT, 'apps', 'api', '.venv', 'bin', 'python3.11'),
+  join(PROJECT_ROOT, 'apps', 'api', '.venv', 'bin', 'python3'),
+  join(PROJECT_ROOT, 'apps', 'api', '.venv', 'bin', 'python'),
+];
+const PROD_PYTHON_PATH = join(RESOURCES_ROOT, 'python', 'bin', 'python3.11');
 
 // ---------------------------------------------------------------------------
 // State
@@ -47,41 +56,114 @@ const API_URL = `http://127.0.0.1:${API_PORT}`;
 let mainWindow = null;
 let setupWindow = null;
 let tray = null;
-let apiProcess = null;
-let schedulerProcess = null;
 let isQuitting = false;
 let apiReady = false;
-let restartAttempts = 0;
-const MAX_RESTART_ATTEMPTS = 3;
+const BUILD_STAMP = 'Jun-09-supervisor-v1';
+const SERVICE_BACKOFF_MS = 5000;
+const HEALTH_CHECK_INTERVAL_MS = 15000;
+const serviceState = {
+  api: {
+    label: 'api',
+    process: null,
+    stopping: false,
+    ready: false,
+    restartTimer: null,
+    healthTimer: null,
+    lastExitCode: null,
+    lastStartAt: null,
+  },
+  scheduler: {
+    label: 'scheduler',
+    process: null,
+    stopping: false,
+    ready: false,
+    restartTimer: null,
+    healthTimer: null,
+    lastExitCode: null,
+    lastStartAt: null,
+  },
+};
 
 // ---------------------------------------------------------------------------
-// Python detection
+// Backend/Python resolution
 // ---------------------------------------------------------------------------
 
-function findPython() {
-  // Check venv first (relative to API_DIR)
-  const venvPython = join(API_DIR, '.venv', 'bin', 'python3');
-  if (existsSync(venvPython)) return venvPython;
-  const venvPython2 = join(API_DIR, '.venv', 'bin', 'python');
-  if (existsSync(venvPython2)) return venvPython2;
-  // macOS Homebrew (Apple Silicon)
-  if (existsSync('/opt/homebrew/bin/python3')) return '/opt/homebrew/bin/python3';
-  // macOS Homebrew (Intel)
-  if (existsSync('/usr/local/bin/python3')) return '/usr/local/bin/python3';
-  // System python
-  if (existsSync('/usr/bin/python3')) return '/usr/bin/python3';
-  // Fallback
-  return 'python3';
+function findExistingPath(candidates) {
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function resolveBackendLaunch() {
+  const pythonPath = isDev ? findExistingPath(DEV_PYTHON_CANDIDATES) : PROD_PYTHON_PATH;
+  if (!pythonPath || !existsSync(pythonPath)) {
+    throw new Error(
+      isDev
+        ? 'Python 3.11+ venv not found. Expected apps/api/.venv/bin/python3.11'
+        : 'Bundled Python 3.11+ runtime not found in app resources. Expected Resources/python/bin/python3.11'
+    );
+  }
+
+  return {
+    command: pythonPath,
+    args: ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(API_PORT)],
+    cwd: API_DIR,
+    pythonPath,
+  };
+}
+
+function ensureLogDir() {
+  const logDir = isDev ? join(PROJECT_ROOT, 'runtime', 'logs') : join(app.getPath('userData'), 'logs');
+  if (!existsSync(logDir)) {
+    mkdirSync(logDir, { recursive: true });
+  }
+  return logDir;
+}
+
+function getSupervisorLogFile() {
+  return join(ensureLogDir(), 'supervisor.log');
+}
+
+function writeSupervisorLog(level, message) {
+  const line = `${new Date().toISOString()} [${level}] ${message}`;
+  console.log(line);
+  try {
+    appendFileSync(getSupervisorLogFile(), `${line}\n`);
+  } catch (err) {
+    console.error(`[BIS] Failed to write supervisor log: ${err.message}`);
+  }
+}
+
+function logSpawnPlan(label, plan, cwdOverride = null) {
+  const resolvedPython = plan.pythonPath || plan.command;
+  writeSupervisorLog('INFO', `Python executable (${label}): ${resolvedPython}`);
+  writeSupervisorLog('INFO', `Working directory (${label}): ${cwdOverride || plan.cwd}`);
+  writeSupervisorLog('INFO', `resourcesPath: ${process.resourcesPath}`);
+  writeSupervisorLog('INFO', `Spawn command (${label}): ${plan.command} ${plan.args.join(' ')}`);
 }
 
 // ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
 
+function ensurePackagedEnvTemplate() {
+  if (isDev) return;
+  if (existsSync(ENV_FILE)) return;
+  if (!existsSync(ENV_TEMPLATE_FILE)) return;
+
+  try {
+    writeFileSync(ENV_FILE, readFileSync(ENV_TEMPLATE_FILE, 'utf-8'));
+  } catch (err) {
+    console.warn(`[BIS] Could not seed packaged env file: ${err.message}`);
+  }
+}
+
 function loadEnv() {
   if (!existsSync(ENV_FILE)) return {};
   const content = readFileSync(ENV_FILE, 'utf-8');
   const env = {};
+
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -90,6 +172,7 @@ function loadEnv() {
       env[match[1].trim()] = match[2].trim().replace(/^["']|["']$/g, '');
     }
   }
+
   return env;
 }
 
@@ -121,7 +204,7 @@ function saveEnvCredentials(creds) {
     }
   }
 
-  writeFileSync(ENV_FILE, content.trim() + '\n');
+  writeFileSync(ENV_FILE, `${content.trim()}\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -130,160 +213,257 @@ function saveEnvCredentials(creds) {
 
 function getProcessEnv() {
   const env = { ...process.env, ...loadEnv() };
-  env.PYTHONPATH = [
+  const pythonPaths = [
     join(PROJECT_ROOT, 'packages', 'core'),
     join(PROJECT_ROOT, 'packages', 'connectors', 'reddit'),
-  ].join(':');
+    API_DIR,
+  ];
+
+  env.PYTHONPATH = [env.PYTHONPATH, ...pythonPaths].filter(Boolean).join(':');
   env.BIS_DB_PATH = join(DATA_DIR, 'black_ink_signal.db');
+
+  if (!env.BIS_SUBREDDITS) {
+    env.BIS_SUBREDDITS = 'Edmonton,tattoos,tattooadvice,tattoodesigns,irezumi,AskReddit';
+  }
+  if (!env.BIS_KEYWORDS) {
+    env.BIS_KEYWORDS = 'tattoo artist|looking for tattoo|cover up tattoo|Edmonton tattoo|black and grey tattoo|realism tattoo|tattoo recommendations|first tattoo|sleeve tattoo|walk in tattoo|tattoo quote';
+  }
+  if (!env.PYTHONUNBUFFERED) {
+    env.PYTHONUNBUFFERED = '1';
+  }
+
   return env;
 }
 
-function startBackend() {
-  return new Promise((resolve, reject) => {
-    const python = findPython();
-    const env = getProcessEnv();
-
-    // Ensure data directory exists
-    if (!existsSync(DATA_DIR)) {
-      mkdirSync(DATA_DIR, { recursive: true });
-    }
-
-    console.log(`[BIS] Starting API: ${python} -m uvicorn app.main:app --port ${API_PORT} --host 127.0.0.1`);
-
-    apiProcess = spawn(python, [
-      '-m', 'uvicorn', 'app.main:app',
-      '--host', '127.0.0.1',
-      '--port', String(API_PORT),
-    ], {
-      cwd: API_DIR,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    apiProcess.stdout.on('data', (data) => {
-      const msg = data.toString();
-      console.log(`[API] ${msg.trim()}`);
-      if (msg.includes('Application startup complete') || msg.includes('Uvicorn running')) {
-        apiReady = true;
-        resolve();
-      }
-    });
-
-    apiProcess.stderr.on('data', (data) => {
-      const msg = data.toString();
-      console.error(`[API:err] ${msg.trim()}`);
-      if (msg.includes('Application startup complete') || msg.includes('Uvicorn running')) {
-        apiReady = true;
-        resolve();
-      }
-    });
-
-    apiProcess.on('error', (err) => {
-      console.error('[BIS] Failed to start API:', err.message);
-      reject(err);
-    });
-
-    apiProcess.on('exit', (code) => {
-      console.log(`[BIS] API exited with code ${code}`);
-      apiReady = false;
-      if (!isQuitting && code !== 0) {
-        handleBackendCrash();
-      }
-    });
-
-    // Timeout: if no startup message in 15s, try health check
-    setTimeout(async () => {
-      if (!apiReady) {
-        try {
-          const res = await fetch(`${API_URL}/health`);
-          if (res.ok) {
-            apiReady = true;
-            resolve();
-          } else {
-            reject(new Error('API health check failed'));
-          }
-        } catch {
-          reject(new Error('API did not start within 15 seconds'));
-        }
-      }
-    }, 15000);
-  });
+function clearServiceTimer(state, key) {
+  if (state[key]) {
+    clearTimeout(state[key]);
+    clearInterval(state[key]);
+    state[key] = null;
+  }
 }
 
-function startScheduler() {
-  const python = findPython();
-  const env = getProcessEnv();
+function markApiReady(ready) {
+  apiReady = ready;
+  serviceState.api.ready = ready;
+  updateTrayMenu();
+}
 
-  console.log('[BIS] Starting scheduler...');
+function scheduleServiceRestart(serviceName, reason) {
+  const state = serviceState[serviceName];
+  if (!state || isQuitting || state.stopping || state.restartTimer) return;
 
-  schedulerProcess = spawn(python, ['app/scheduler.py'], {
-    cwd: API_DIR,
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  writeSupervisorLog('WARN', `Scheduling ${serviceName} restart in ${SERVICE_BACKOFF_MS}ms (${reason})`);
+  state.restartTimer = setTimeout(async () => {
+    state.restartTimer = null;
+    try {
+      await startService(serviceName);
+    } catch (err) {
+      writeSupervisorLog('ERROR', `Restart failed for ${serviceName}: ${err.message}`);
+      scheduleServiceRestart(serviceName, 'restart_failed');
+    }
+  }, SERVICE_BACKOFF_MS);
+}
+
+function attachProcessLogging(serviceName, child) {
+  child.stdout.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (!msg) return;
+    writeSupervisorLog('INFO', `[${serviceName}] ${msg}`);
+    if (serviceName === 'api' && (msg.includes('Application startup complete') || msg.includes('Uvicorn running'))) {
+      markApiReady(true);
+    }
   });
 
-  schedulerProcess.stdout.on('data', (d) => console.log(`[SCHED] ${d.toString().trim()}`));
-  schedulerProcess.stderr.on('data', (d) => console.error(`[SCHED:err] ${d.toString().trim()}`));
-  schedulerProcess.on('exit', (code) => {
-    console.log(`[BIS] Scheduler exited with code ${code}`);
-    if (!isQuitting && code !== 0) {
-      // Restart scheduler silently
-      setTimeout(() => startScheduler(), 5000);
+  child.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (!msg) return;
+    writeSupervisorLog('ERROR', `[${serviceName}] ${msg}`);
+    if (serviceName === 'api' && (msg.includes('Application startup complete') || msg.includes('Uvicorn running'))) {
+      markApiReady(true);
     }
   });
 }
 
-function stopBackend() {
-  if (apiProcess) {
-    apiProcess.kill('SIGTERM');
-    apiProcess = null;
-  }
-  if (schedulerProcess) {
-    schedulerProcess.kill('SIGTERM');
-    schedulerProcess = null;
-  }
+function startApiHealthMonitor() {
+  const state = serviceState.api;
+  clearServiceTimer(state, 'healthTimer');
+  state.healthTimer = setInterval(async () => {
+    if (isQuitting || state.stopping || !state.process) return;
+    try {
+      const res = await fetch(`${API_URL}/health`);
+      const ok = res.ok;
+      markApiReady(ok);
+      if (!ok) {
+        writeSupervisorLog('WARN', 'API health check returned non-OK status');
+      }
+    } catch (err) {
+      markApiReady(false);
+      writeSupervisorLog('WARN', `API health check failed: ${err.message}`);
+    }
+  }, HEALTH_CHECK_INTERVAL_MS);
 }
 
-async function handleBackendCrash() {
-  restartAttempts++;
-  if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-    dialog.showErrorBox(
-      'Black Ink Signal — Backend Failed',
-      `The backend crashed ${MAX_RESTART_ATTEMPTS} times and won't restart.\n\n` +
-      'Possible issues:\n' +
-      '• Python not found or wrong version\n' +
-      '• Missing dependencies (run: pip install -r requirements.txt)\n' +
-      '• Port 8787 already in use\n\n' +
-      'Check the console logs for details.'
-    );
-    return;
-  }
-
-  console.log(`[BIS] Backend crashed. Restart attempt ${restartAttempts}/${MAX_RESTART_ATTEMPTS}...`);
-
-  try {
-    await startBackend();
-    startScheduler();
-    restartAttempts = 0; // Reset on success
-  } catch (err) {
-    handleBackendCrash();
-  }
+function startSchedulerHealthMonitor() {
+  const state = serviceState.scheduler;
+  clearServiceTimer(state, 'healthTimer');
+  state.healthTimer = setInterval(() => {
+    if (isQuitting || state.stopping) return;
+    if (!state.process || state.process.killed) {
+      writeSupervisorLog('WARN', 'Scheduler health check detected missing process');
+      scheduleServiceRestart('scheduler', 'health_check_missing_process');
+    }
+  }, HEALTH_CHECK_INTERVAL_MS);
 }
-
-// ---------------------------------------------------------------------------
-// Health check polling
-// ---------------------------------------------------------------------------
 
 async function waitForApi(timeoutMs = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(`${API_URL}/health`);
-      if (res.ok) return true;
-    } catch {}
-    await new Promise(r => setTimeout(r, 500));
+      if (res.ok) {
+        markApiReady(true);
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    await new Promise((r) => setTimeout(r, 500));
   }
   return false;
+}
+
+function getServiceLaunchConfig(serviceName) {
+  const plan = resolveBackendLaunch();
+  if (serviceName === 'scheduler') {
+    return {
+      command: plan.command,
+      args: ['-m', 'app.scheduler'],
+      cwd: API_DIR,
+      pythonPath: plan.pythonPath,
+    };
+  }
+  return plan;
+}
+
+async function startService(serviceName) {
+  const state = serviceState[serviceName];
+  if (!state) {
+    throw new Error(`Unknown service: ${serviceName}`);
+  }
+  if (state.process && !state.process.killed) {
+    return;
+  }
+
+  const env = getProcessEnv();
+  const plan = getServiceLaunchConfig(serviceName);
+
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  state.stopping = false;
+  state.lastStartAt = new Date().toISOString();
+  logSpawnPlan(serviceName, plan);
+  writeSupervisorLog('INFO', `Starting ${serviceName}`);
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const child = spawn(plan.command, plan.args, {
+      cwd: plan.cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    state.process = child;
+    attachProcessLogging(serviceName, child);
+
+    child.on('error', (err) => {
+      state.process = null;
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+      writeSupervisorLog('ERROR', `${serviceName} failed to start: ${err.message}`);
+      scheduleServiceRestart(serviceName, 'spawn_error');
+    });
+
+    child.on('exit', (code, signal) => {
+      state.lastExitCode = code;
+      state.process = null;
+      state.ready = false;
+      if (serviceName === 'api') {
+        markApiReady(false);
+      }
+      writeSupervisorLog('WARN', `${serviceName} exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
+      if (!isQuitting && !state.stopping) {
+        scheduleServiceRestart(serviceName, 'unexpected_exit');
+      }
+      updateTrayMenu();
+    });
+
+    if (serviceName === 'scheduler') {
+      state.ready = true;
+      updateTrayMenu();
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+      return;
+    }
+
+    waitForApi(15000)
+      .then((ready) => {
+        if (!settled) {
+          settled = true;
+          if (ready) {
+            resolve();
+          } else {
+            reject(new Error('API did not become healthy within 15 seconds'));
+          }
+        }
+      })
+      .catch((err) => {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      });
+  });
+
+  state.ready = true;
+  if (serviceName === 'api') {
+    startApiHealthMonitor();
+  } else if (serviceName === 'scheduler') {
+    startSchedulerHealthMonitor();
+  }
+  updateTrayMenu();
+}
+
+function stopService(serviceName) {
+  const state = serviceState[serviceName];
+  if (!state) return;
+
+  state.stopping = true;
+  clearServiceTimer(state, 'restartTimer');
+  clearServiceTimer(state, 'healthTimer');
+
+  if (state.process) {
+    writeSupervisorLog('INFO', `Stopping ${serviceName}`);
+    state.process.kill('SIGTERM');
+    state.process = null;
+  }
+
+  state.ready = false;
+  if (serviceName === 'api') {
+    markApiReady(false);
+  }
+  updateTrayMenu();
+}
+
+function stopManagedServices() {
+  stopService('scheduler');
+  stopService('api');
 }
 
 // ---------------------------------------------------------------------------
@@ -291,13 +471,18 @@ async function waitForApi(timeoutMs = 20000) {
 // ---------------------------------------------------------------------------
 
 function createMainWindow() {
+  writeSupervisorLog('INFO', `Window runtime isDev=${isDev} app.isPackaged=${app.isPackaged}`);
+  writeSupervisorLog('INFO', `Window __dirname=${__dirname}`);
+  writeSupervisorLog('INFO', `Window APP_ROOT=${APP_ROOT}`);
+  writeSupervisorLog('INFO', `Window PROD_HTML=${PROD_HTML}`);
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 600,
     title: 'Black Ink Signal',
-    titleBarStyle: 'hiddenInset',  // macOS native feel
+    titleBarStyle: 'hiddenInset',
     backgroundColor: '#09090b',
     show: false,
     webPreferences: {
@@ -308,8 +493,10 @@ function createMainWindow() {
   });
 
   if (isDev) {
+    writeSupervisorLog('INFO', `Loading dev URL ${DEV_URL}`);
     mainWindow.loadURL(DEV_URL);
   } else {
+    writeSupervisorLog('INFO', `Loading packaged HTML ${PROD_HTML}`);
     mainWindow.loadFile(PROD_HTML);
   }
 
@@ -317,7 +504,6 @@ function createMainWindow() {
     mainWindow.show();
   });
 
-  // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -348,11 +534,11 @@ function createSetupWindow() {
 
   setupWindow.loadFile(join(__dirname, 'setup.html'));
 
-  // Open external links in system browser
   setupWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+
   setupWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http') && !url.includes('localhost')) {
       event.preventDefault();
@@ -365,29 +551,24 @@ function createSetupWindow() {
 // Tray
 // ---------------------------------------------------------------------------
 
-function createTray() {
-  // 22x22 macOS tray icon (template image for dark/light mode)
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAAhUlEQVQ4T' +
-    '2NkYPj/n4EBHTAyMDAyoIthVcfIiKGOEUMdI1Z1jMg2MOJQR7YNjBjqGLFsYMSwgRGHOkZsGxgx1DFi' +
-    '2cCIywZGDHWMWDYw4tLAiKGOEcsGRlwaGDHUMWLZwIhLAyOGOkYsGxhxaWDEUMeIZQMjLg2M6OoYAQC2' +
-    'kx4WkZcKIQAAAABJRU5ErkJggg=='
-  );
-  icon.setTemplateImage(true);
-
-  tray = new Tray(icon);
-  tray.setToolTip('Black Ink Signal');
-
-  const contextMenu = Menu.buildFromTemplate([
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
     {
       label: 'Show Black Ink Signal',
       click: () => {
-        if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
       },
     },
     { type: 'separator' },
     {
       label: apiReady ? '● API Running' : '○ API Offline',
+      enabled: false,
+    },
+    {
+      label: serviceState.scheduler.process ? '● Scheduler Running' : '○ Scheduler Offline',
       enabled: false,
     },
     { type: 'separator' },
@@ -396,35 +577,58 @@ function createTray() {
       accelerator: 'CmdOrCtrl+Q',
       click: () => {
         isQuitting = true;
-        stopBackend();
+        stopManagedServices();
         app.quit();
       },
     },
   ]);
+}
 
-  tray.setContextMenu(contextMenu);
+function updateTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(buildTrayMenu());
+}
+
+function createTray() {
+  if (tray) {
+    updateTrayMenu();
+    return;
+  }
+
+  const icon = nativeImage.createFromDataURL(
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAAhUlEQVQ4T' +
+      '2NkYPj/n4EBHTAyMDAyoIthVcfIiKGOEUMdI1Z1jMg2MOJQR7YNjBjqGLFsYMSwgRGHOkZsGxgx1DFi' +
+      '2cCIywZGDHWMWDYw4tLAiKGOEcsGRlwaGDHUMWLZwIhLAyOGOkYsGxhxaWDEUMeIZQMjLg2M6OoYAQC2' +
+      'kx4WkZcKIQAAAABJRU5ErkJggg=='
+  );
+  icon.setTemplateImage(true);
+
+  tray = new Tray(icon);
+  tray.setToolTip('Black Ink Signal');
+  updateTrayMenu();
   tray.on('double-click', () => {
-    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 }
 
 // ---------------------------------------------------------------------------
-// IPC handlers (for setup window)
+// IPC handlers
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('save-credentials', async (event, creds) => {
+ipcMain.handle('save-credentials', async (_event, creds) => {
   saveEnvCredentials(creds);
   return { success: true };
 });
 
-ipcMain.handle('get-env-status', async () => {
-  return {
-    hasCredentials: hasRedditCredentials(),
-    envPath: ENV_FILE,
-    apiPort: API_PORT,
-    projectRoot: PROJECT_ROOT,
-  };
-});
+ipcMain.handle('get-env-status', async () => ({
+  hasCredentials: hasRedditCredentials(),
+  envPath: ENV_FILE,
+  apiPort: API_PORT,
+  projectRoot: PROJECT_ROOT,
+}));
 
 ipcMain.handle('start-app', async () => {
   if (setupWindow) {
@@ -442,34 +646,40 @@ ipcMain.handle('skip-setup', async () => {
   await launchApp();
 });
 
+ipcMain.handle('open-external', async (_event, url) => {
+  if (!url || typeof url !== 'string') {
+    throw new Error('Invalid URL');
+  }
+  await shell.openExternal(url);
+  return { success: true };
+});
+
 // ---------------------------------------------------------------------------
 // Launch flow
 // ---------------------------------------------------------------------------
 
 async function launchApp() {
-  // Show splash / loading state
-  createMainWindow();
+  if (!mainWindow) {
+    createMainWindow();
+  }
 
   try {
-    await startBackend();
+    await startService('api');
+    await startService('scheduler');
   } catch (err) {
     const ready = await waitForApi(5000);
     if (!ready) {
+      writeSupervisorLog('ERROR', `Startup failed: ${err.message}`);
       dialog.showErrorBox(
         'Black Ink Signal — Startup Error',
-        `Could not start the backend server.\n\n` +
-        `Error: ${err.message}\n\n` +
-        'Make sure Python 3.11+ is installed and dependencies are set up.\n' +
-        'See docs/LOCAL_SETUP.md for details.'
+        `Could not start the backend services.\n\nError: ${err.message}\n\n` +
+          `Review the supervisor log at:\n${getSupervisorLogFile()}`
       );
     }
   }
 
-  // Start scheduler (non-blocking)
-  startScheduler();
-
-  // Create tray
   createTray();
+  updateTrayMenu();
 }
 
 // ---------------------------------------------------------------------------
@@ -477,19 +687,24 @@ async function launchApp() {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
-  // macOS: set dock icon
+  ensureLogDir();
+  writeSupervisorLog('INFO', `Build: ${BUILD_STAMP}`);
+  writeSupervisorLog('INFO', `Runtime app.isPackaged=${app.isPackaged}`);
+  writeSupervisorLog('INFO', `Runtime __dirname=${__dirname}`);
+  writeSupervisorLog('INFO', `Runtime APP_ROOT=${APP_ROOT}`);
+  writeSupervisorLog('INFO', `Runtime PROD_HTML=${PROD_HTML}`);
+
+  ensurePackagedEnvTemplate();
+
   if (process.platform === 'darwin') {
-    // The dock icon is set via the .icns in the build config
-    app.dock.setMenu(Menu.buildFromTemplate([
-      { label: 'Show Window', click: () => mainWindow?.show() },
-    ]));
+    app.dock.setMenu(
+      Menu.buildFromTemplate([{ label: 'Show Window', click: () => mainWindow?.show() }])
+    );
   }
 
-  // First-run check
   const hasEnv = existsSync(ENV_FILE) && hasRedditCredentials();
 
   if (!hasEnv && !isDev) {
-    // Show setup flow
     createSetupWindow();
   } else {
     await launchApp();
@@ -497,7 +712,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // Don't quit — stay in tray
+  // stay resident in tray
 });
 
 app.on('activate', () => {
@@ -510,9 +725,17 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
-  stopBackend();
+  stopManagedServices();
 });
 
-// Graceful shutdown on signals
-process.on('SIGTERM', () => { isQuitting = true; stopBackend(); app.quit(); });
-process.on('SIGINT', () => { isQuitting = true; stopBackend(); app.quit(); });
+process.on('SIGTERM', () => {
+  isQuitting = true;
+  stopManagedServices();
+  app.quit();
+});
+
+process.on('SIGINT', () => {
+  isQuitting = true;
+  stopManagedServices();
+  app.quit();
+});

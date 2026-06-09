@@ -27,6 +27,7 @@ from black_ink_signal_core.enrichment import enrich_lead, enrich_all_pending
 from black_ink_signal_core.classifier.pipeline import ClassifierPipeline
 from black_ink_signal_core.notifications import get_recent_notifications, notify_hot_leads
 from black_ink_signal_core.ingest import ingest_reddit_items
+from black_ink_signal_core.ingest_web import ingest_web_items
 from black_ink_signal_core.scoring import score_lead as _score_lead_fn
 from black_ink_signal_core.semantic import TFIDFIndex
 
@@ -825,7 +826,7 @@ def admin_fetch_reddit():
             run = SourceRun(source="reddit")
             session.add(run)
             session.commit()
-            stats = ingest_reddit_items(session, items, source_run=run)
+            stats = ingest_web_items(session, items, source_run=run)
 
         return {"status": "ok", "items_fetched": len(items), **stats}
     except Exception as e:

@@ -10,6 +10,7 @@ import os
 import sys
 import logging
 import signal
+import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -45,6 +46,12 @@ logger = logging.getLogger("bis.scheduler")
 REDDIT_INTERVAL_MINUTES = int(os.environ.get("BIS_REDDIT_INTERVAL", "5"))
 ENRICHMENT_INTERVAL_MINUTES = int(os.environ.get("BIS_ENRICHMENT_INTERVAL", "2"))
 ENRICHMENT_BATCH_SIZE = int(os.environ.get("BIS_ENRICHMENT_BATCH", "20"))
+FACEBOOK_INTERVAL_MINUTES = int(os.environ.get("BIS_FACEBOOK_INTERVAL", "0"))
+FACEBOOK_SCAN_SCRIPT = Path(os.environ.get(
+    "BIS_FACEBOOK_SCAN_SCRIPT",
+    str(Path(__file__).resolve().parents[2] / "tools" / "mac_browser_scan_mvp.js"),
+))
+FACEBOOK_SCAN_TIMEOUT_SECONDS = int(os.environ.get("BIS_FACEBOOK_SCAN_TIMEOUT", "180"))
 
 # Reddit OAuth (optional — falls back to public JSON)
 REDDIT_CLIENT_ID = os.environ.get("BIS_REDDIT_CLIENT_ID", "")
@@ -110,7 +117,6 @@ def reddit_fetch_job():
             stats = ingest_reddit_items(session, items, source_run=run)
             logger.info(f"Ingest: added={stats['added']} updated={stats['updated']} skipped={stats['skipped']}")
 
-            # Notify on hot leads
             if stats['added'] > 0:
                 notify_hot_leads(session)
 
@@ -118,6 +124,44 @@ def reddit_fetch_job():
         logger.error(f"Reddit fetch failed: {e}", exc_info=True)
     finally:
         connector.close()
+
+
+def facebook_browser_fetch_job():
+    """Run the browser-assisted Facebook scanner via Chrome DevTools, if available."""
+    if not FACEBOOK_SCAN_SCRIPT.exists():
+        logger.error(f"Facebook browser scan script not found: {FACEBOOK_SCAN_SCRIPT}")
+        return
+
+    logger.info("Facebook browser scan starting...")
+    try:
+        env = os.environ.copy()
+        env.setdefault("BIS_BROWSER_SCAN_MODE", "post")
+        result = subprocess.run(
+            ["node", str(FACEBOOK_SCAN_SCRIPT)],
+            cwd=str(FACEBOOK_SCAN_SCRIPT.parent.parent),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=FACEBOOK_SCAN_TIMEOUT_SECONDS,
+            check=False,
+        )
+        if result.stdout.strip():
+            logger.info(result.stdout.strip())
+        if result.returncode != 0:
+            if result.stderr.strip():
+                logger.warning(result.stderr.strip())
+            logger.warning(
+                "Facebook browser scan skipped/failed. "
+                "Chrome DevTools on port 9222 may be unavailable, or the scan could not ingest results."
+            )
+            return
+        if result.stderr.strip():
+            logger.info(result.stderr.strip())
+        logger.info("Facebook browser scan finished successfully")
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Facebook browser scan timed out after {FACEBOOK_SCAN_TIMEOUT_SECONDS}s")
+    except Exception as e:
+        logger.error(f"Facebook browser scan failed: {e}", exc_info=True)
 
 
 def enrichment_job():
@@ -139,6 +183,7 @@ def enrichment_job():
 def main():
     logger.info("=== Black Ink Signal Scheduler ===")
     logger.info(f"Reddit interval: {REDDIT_INTERVAL_MINUTES}m")
+    logger.info(f"Facebook browser interval: {FACEBOOK_INTERVAL_MINUTES}m")
     logger.info(f"Enrichment interval: {ENRICHMENT_INTERVAL_MINUTES}m")
     logger.info(f"LLM enrichment: {'enabled' if LLM_API_KEY else 'rule-based only'}")
 
@@ -149,8 +194,19 @@ def main():
         trigger=IntervalTrigger(minutes=REDDIT_INTERVAL_MINUTES),
         id="reddit_fetch",
         name="Reddit public fetch",
-        next_run_time=datetime.now(timezone.utc),  # run immediately on start
+        next_run_time=datetime.now(timezone.utc),
     )
+
+    if FACEBOOK_INTERVAL_MINUTES > 0:
+        scheduler.add_job(
+            facebook_browser_fetch_job,
+            trigger=IntervalTrigger(minutes=FACEBOOK_INTERVAL_MINUTES),
+            id="facebook_browser_fetch",
+            name="Facebook browser-assisted fetch",
+            next_run_time=datetime.now(timezone.utc),
+        )
+    else:
+        logger.info("Facebook browser scan disabled (set BIS_FACEBOOK_INTERVAL > 0 to enable)")
 
     scheduler.add_job(
         enrichment_job,
@@ -160,7 +216,6 @@ def main():
         next_run_time=datetime.now(timezone.utc),
     )
 
-    # Graceful shutdown
     def shutdown(signum, frame):
         logger.info("Shutting down scheduler...")
         scheduler.shutdown(wait=False)

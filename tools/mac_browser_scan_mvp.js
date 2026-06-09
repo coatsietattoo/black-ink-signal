@@ -8,7 +8,6 @@ const apiBaseUrl = (process.env.BIS_API_BASE_URL || 'http://127.0.0.1:8000').rep
 const endpointUrl = `${apiBaseUrl}/admin/ingest-browser-items`;
 const outputPath = path.join(__dirname, 'mac_browser_scan_output.json');
 const scanMode = (process.env.BIS_BROWSER_SCAN_MODE || 'stdout').toLowerCase();
-const groupTargets = parseGroupTargets();
 
 const CONVERSATION_INTENT_TERMS = [
   'can anyone recommend',
@@ -76,6 +75,8 @@ const DEFAULT_GROUP_TARGETS = [
   { name: 'Leduc Local Chat', url: 'https://www.facebook.com/groups/505641606871354/' },
   { name: 'Edmonton Moms Community Group', url: 'https://www.facebook.com/groups/edmontonmomscommunity/' }
 ];
+
+const groupTargets = parseGroupTargets();
 
 function parseGroupTargets() {
   const raw = process.env.BIS_FACEBOOK_GROUP_URLS || process.env.BIS_BROWSER_SCAN_URLS || '';

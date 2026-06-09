@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Black Ink Signal — Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+      background: #09090b;
+      color: #fafafa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 40px;
+      -webkit-app-region: drag;
+    }
+    .setup-card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 480px;
+      width: 100%;
+      -webkit-app-region: no-drag;
+    }
+    .setup-header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .setup-header .icon {
+      font-size: 32px;
+      color: #a78bfa;
+      margin-bottom: 8px;
+    }
+    .setup-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .setup-header p {
+      font-size: 12px;
+      color: #71717a;
+      margin-top: 4px;
+    }
+    .step {
+      margin-bottom: 20px;
+    }
+    .step-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .step-title .num {
+      background: #a78bfa;
+      color: #000;
+      font-size: 10px;
+      font-weight: 700;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-desc {
+      font-size: 11px;
+      color: #a1a1aa;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+    .step-desc a {
+      color: #a78bfa;
+      text-decoration: none;
+    }
+    .step-desc a:hover {
+      text-decoration: underline;
+    }
+    .field {
+      margin-bottom: 10px;
+    }
+    .field label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #71717a;
+      margin-bottom: 3px;
+    }
+    .field input {
+      width: 100%;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 8px 12px;
+      border: 1px solid #27272a;
+      border-radius: 6px;
+      background: #09090b;
+      color: #fafafa;
+      outline: none;
+    }
+    .field input:focus {
+      border-color: #a78bfa;
+    }
+    .field input::placeholder {
+      color: #52525b;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+    }
+    .btn {
+      flex: 1;
+      font-family: inherit;
+      font-size: 13px;
+      padding: 10px 20px;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      background: transparent;
+      color: #fafafa;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn:hover {
+      border-color: #a78bfa;
+    }
+    .btn--primary {
+      background: #a78bfa;
+      color: #000;
+      border-color: #a78bfa;
+      font-weight: 600;
+    }
+    .btn--primary:hover {
+      opacity: 0.9;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .status {
+      text-align: center;
+      font-size: 11px;
+      color: #22c55e;
+      margin-top: 12px;
+    }
+    .status.error {
+      color: #ef4444;
+    }
+    .note {
+      font-size: 10px;
+      color: #52525b;
+      text-align: center;
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-card">
+    <div class="setup-header">
+      <div class="icon">◆</div>
+      <h1>Black Ink Signal</h1>
+      <p>Lead intelligence for tattoo studios</p>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">1</span> Create a Reddit App</div>
+      <div class="step-desc">
+        Go to <a href="https://www.reddit.com/prefs/apps" target="_blank">reddit.com/prefs/apps</a>
+        and click <strong>"create another app..."</strong><br>
+        • Type: <strong>script</strong><br>
+        • Name: <strong>BlackInkSignal</strong><br>
+        • Redirect URI: <strong>http://localhost:8787</strong>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-title"><span class="num">2</span> Enter Your Credentials</div>
+      <div class="step-desc">
+        Copy the <strong>client ID</strong> (under the app name) and <strong>secret</strong> from your Reddit app.
+      </div>
+      <div class="field">
+        <label>Client ID</label>
+        <input type="text" id="clientId" placeholder="e.g. aBcDeFgHiJkLmN" />
+      </div>
+      <div class="field">
+        <label>Client Secret</label>
+        <input type="password" id="clientSecret" placeholder="Your app secret" />
+      </div>
+      <div class="field">
+        <label>Reddit Username</label>
+        <input type="text" id="username" placeholder="Your Reddit username" />
+      </div>
+      <div class="field">
+        <label>Reddit Password</label>
+        <input type="password" id="password" placeholder="Your Reddit password" />
+      </div>
+      <div class="field">
+        <label>User Agent (optional)</label>
+        <input type="text" id="userAgent" placeholder="BlackInkSignal/0.1 (by /u/your_username)" />
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="skipBtn" onclick="skipSetup()">Skip for now</button>
+      <button class="btn btn--primary" id="saveBtn" onclick="saveAndLaunch()">Save & Launch →</button>
+    </div>
+
+    <div id="status" class="status" style="display:none;"></div>
+
+    <div class="note">
+      Credentials are saved locally in .env and never sent anywhere.<br>
+      You can skip this step and use demo data instead.
+    </div>
+  </div>
+
+  <script>
+    async function saveAndLaunch() {
+      const creds = {
+        clientId: document.getElementById('clientId').value.trim(),
+        clientSecret: document.getElementById('clientSecret').value.trim(),
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value.trim(),
+        userAgent: document.getElementById('userAgent').value.trim() || 'BlackInkSignal/0.1',
+      };
+
+      if (!creds.clientId || !creds.clientSecret) {
+        showStatus('Client ID and Secret are required', true);
+        return;
+      }
+
+      document.getElementById('saveBtn').disabled = true;
+      showStatus('Saving credentials...');
+
+      try {
+        await window.bis.saveCredentials(creds);
+        showStatus('Launching Black Ink Signal...');
+        await window.bis.startApp();
+      } catch (err) {
+        showStatus('Error: ' + err.message, true);
+        document.getElementById('saveBtn').disabled = false;
+      }
+    }
+
+    async function skipSetup() {
+      showStatus('Launching with demo data...');
+      await window.bis.skipSetup();
+    }
+
+    function showStatus(msg, isError = false) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = isError ? 'status error' : 'status';
+      el.style.display = 'block';
+    }
+  </script>
+</body>
+</html>

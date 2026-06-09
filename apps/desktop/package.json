@@ -1,0 +1,137 @@
+{
+  "name": "black-ink-signal-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Black Ink Signal — lead intelligence for tattoo studios",
+  "author": "Black Ink Signal",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "NODE_ENV=development electron electron/main.js",
+    "electron:build": "vite build && electron-builder --mac",
+    "electron:build:all": "vite build && electron-builder --mac --win --linux",
+    "electron:build:mac-local": "vite build && electron-builder --mac dir zip",
+    "start": "electron electron/main.js",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.29",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  },
+  "build": {
+    "appId": "com.blackinksignal.desktop",
+    "productName": "Black Ink Signal",
+    "copyright": "Copyright © 2026 Black Ink Signal",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!electron/main.js.map"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/python",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../../packages",
+        "to": "app/packages",
+        "filter": [
+          "**/*.py",
+          "**/__init__.py",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../../apps/api",
+        "to": "app/apps/api",
+        "filter": [
+          "**/*.py",
+          "**/*.txt",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../../data",
+        "to": "app/data",
+        "filter": [
+          ".gitkeep"
+        ]
+      },
+      {
+        "from": "../../.env.example",
+        "to": "app/.env.example"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.business",
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "artifactName": "BlackInkSignal-${version}-${os}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Black Ink Signal",
+      "backgroundColor": "#09090b",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "artifactName": "BlackInkSignal-${version}-${os}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png",
+      "category": "Office",
+      "artifactName": "BlackInkSignal-${version}-${os}-${arch}.${ext}"
+    }
+  }
+}

@@ -235,6 +235,7 @@ function buildLeadObject(block, rawPageTitle, rawPageUrl, groupName) {
   const itemId = stableUrl
     ? `browser_${Buffer.from(stableUrl).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)}`
     : `browser_${Buffer.from(block.preview).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)}`;
+  const forum = groupName || rawPageTitle || '';
 
   return {
     source,
@@ -244,13 +245,15 @@ function buildLeadObject(block, rawPageTitle, rawPageUrl, groupName) {
     title: block.preview,
     snippet: block.preview,
     text: block.text,
-    forum: groupName || rawPageTitle || '',
+    forum,
     created_at: null,
     raw: {
+      platform: detectPlatform(canonicalUrl || rawPageUrl),
       kind: 'browser_conversation',
       domain_class: 'social_public',
       topic_tag: block.topicTag,
       is_tattoo_related: block.isTattooRelated,
+      intent_score: block.intentScore,
       conversation_intent_terms: block.conversationIntentTerms,
       local_terms: block.localTerms,
       tattoo_terms: block.tattooTerms,
@@ -258,7 +261,7 @@ function buildLeadObject(block, rawPageTitle, rawPageUrl, groupName) {
       raw_page_url: rawPageUrl,
       raw_post_url_found: Boolean(block.postUrl),
       human_review_only: true,
-      group_name: groupName || rawPageTitle || '',
+      group_name: forum,
     }
   };
 }
